@@ -26,7 +26,7 @@ def main():
     GPU_ID      = "0"
     DATA_PATH   = "data/public.jsonl" if evaluation else "data/private.jsonl"
     OUTPUT_PATH = args.output_path
-    MAX_TOKENS  = 8192
+    MAX_TOKENS  = 4096
 
     os.environ["CUDA_VISIBLE_DEVICES"] = GPU_ID
 
@@ -42,7 +42,7 @@ def main():
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
             "dataset": DATA_PATH,
-            "temperature": 0.3, 
+            "temperature": 0.6, 
             "top_p": 0.95
         }
     )
@@ -57,7 +57,7 @@ def main():
     "You are a careful and rigorous mathematician. Solve the problem step by step, "
     "showing clear reasoning and calculations."
     
-    "After solving, verify your result for correctness."
+    "After solving, verify your result for correctness. Make sure to keep the answer concise."
     
     "IMPORTANT:\n"
     "- Do not include any text after the boxed answer.\n"
