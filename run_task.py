@@ -19,7 +19,7 @@ def main():
     parser.add_argument("--eval", type=bool, default=False, help="Whether this is evaluation (public) or inference (private) run")
     parser.add_argument("--num_samples", type=int, default=None, help="Limit the number of questions to process")
     parser.add_argument("--output_path", type=str, required=True, help="Path to save the JSONL results")
-    parser.add_argument("--temperature", type=float, default=0.6, help="Temperature for sampling")
+    parser.add_argument("--temperature", type=float, default=0, help="Temperature for sampling")
     parser.add_argument("--top_p", type=float, default=0.95, help="Top-p for sampling")
     args = parser.parse_args()
 
@@ -37,10 +37,10 @@ def main():
     wandb.init(
         entity="dame-dolla",
         project="cse151b",
-        group="exp-01-temp",
+        group="exp-02-prompts",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-01temp-200q",
-        tags=["baseline", "public-data"],
+        name="eval-01prompt-200q",
+        tags=["prompts", "public-data"],
         config={
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
@@ -57,16 +57,23 @@ def main():
 
 
     SYSTEM_PROMPT_MATH = (
-        "You are an expert mathematician. Solve the problem step-by-step. "
+        "You are an expert mathematician. Solve the problem step-by-step inside <think> tags. "
         "Put your final answer inside \\boxed{}. "
-        "If the problem has multiple sub-answers, separate them by commas inside a single \\boxed{}, "
-        "e.g. \\boxed{3, 7}."
+        "CRITICAL FORMATTING RULES:\n"
+        "1. NO UNITS: Never include units (e.g., 'feet', 'cm', '$') or labels (e.g., 'x =') inside the \\boxed{} tag.\n"
+        "2. MULTIPLE ANSWERS: If the problem has multiple sub-answers, separate them by commas inside a single box, e.g., \\boxed{3, 7}.\n"
+        "3. COORDINATES & INTERVALS: Always include the enclosing parentheses or brackets, e.g., \\boxed{(2, -2)}.\n"
+        "4. EXACT FORM & DECIMALS: Default to exact symbolic forms (simplified fractions, \\pi, radicals). "
+        "If the problem explicitly asks for a decimal, you MUST provide it to at least 6 decimal places (e.g., \\boxed{3.141592}).\n"
+        "BEHAVIORAL RULE: Keep your <think> block brief and mathematically dense. Focus strictly on core equations and derivations. Do not write paragraphs of conversational text."
     )
 
     SYSTEM_PROMPT_MCQ = (
-        "You are an expert mathematician. "
-        "Read the problem and the answer choices below, then select the single best answer. "
-        "Output ONLY the letter of your chosen option inside \\boxed{}, e.g. \\boxed{C}."
+        "You are an expert mathematician. Solve the problem step-by-step inside <think> tags. "
+        "Read the answer choices and select the single best answer. "
+        "CRITICAL FORMATTING RULE: Output ONLY the single uppercase letter of your chosen option inside \\boxed{}. "
+        "Do not include the mathematical value, decimals, or any punctuation inside the box. Example: \\boxed{C}.\n"
+        "BEHAVIORAL RULE: Keep your <think> block brief and mathematically dense. Use high-precision math (calculating to at least 6 decimals if necessary) to logically eliminate wrong options quickly without rambling."
     )
 
     def build_prompt(question: str, options: Optional[list]) -> tuple[str, str]:
@@ -157,7 +164,8 @@ def main():
                         gold=gold_list,
                         options=[[]] * len(gold_list),
                     )
-                except Exception:
+                except Exception as e:
+                    print(f"JUDGER CRASHED ON: {item.get("id")} | Error: {e}")
                     correct = False
 
             results.append({
