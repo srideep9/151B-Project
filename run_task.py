@@ -17,7 +17,10 @@ from judger import Judger
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval", type=bool, default=False, help="Whether this is evaluation (public) or inference (private) run")
+    parser.add_argument("--num_samples", type=int, default=None, help="Limit the number of questions to process")
     parser.add_argument("--output_path", type=str, required=True, help="Path to save the JSONL results")
+    parser.add_argument("--temperature", type=float, default=0.6, help="Temperature for sampling")
+    parser.add_argument("--top_p", type=float, default=0.95, help="Top-p for sampling")
     args = parser.parse_args()
 
     evaluation = args.eval
@@ -26,7 +29,7 @@ def main():
     GPU_ID      = "0"
     DATA_PATH   = "data/public.jsonl" if evaluation else "data/private.jsonl"
     OUTPUT_PATH = args.output_path
-    MAX_TOKENS  = 8192
+    MAX_TOKENS  = 4096
 
     os.environ["CUDA_VISIBLE_DEVICES"] = GPU_ID
 
@@ -34,16 +37,16 @@ def main():
     wandb.init(
         entity="dame-dolla",
         project="cse151b",
-        group="exp-00-baselines",
+        group="exp-01-temp",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-base",
+        name="eval-01temp-200q",
         tags=["baseline", "public-data"],
         config={
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
             "dataset": DATA_PATH,
-            "temperature": 0.6, 
-            "top_p": 0.95
+            "temperature": args.temperature,
+            "top_p": args.top_p
         }
     )
 
@@ -84,15 +87,16 @@ def main():
         load_format="bitsandbytes",
         enable_prefix_caching=False,
         gpu_memory_utilization=0.9,
-        max_model_len=10240,
+        max_model_len=8192,
         trust_remote_code=True,
-        max_num_seqs=8,
+        max_num_seqs=16,
+        disable_log_stats=False,
     )
 
     sampling_params = SamplingParams(
         max_tokens=MAX_TOKENS,
-        temperature=0.6,
-        top_p=0.95,
+        temperature=args.temperature,
+        top_p=args.top_p,
         top_k=20,
         min_p=0.0,
         presence_penalty=0.0,
@@ -101,6 +105,9 @@ def main():
 
     print("Model loaded.")
 
+    if args.num_samples is not None:
+        data = data[:args.num_samples]
+        print(f"Using only the first {args.num_samples} questions for evaluation.")
 
     prompts = []
     for item in data:
@@ -114,7 +121,7 @@ def main():
         prompts.append(prompt_text)
 
     print(f"Generating responses for {len(prompts)} questions...")
-    outputs = llm.generate(prompts, sampling_params=sampling_params)
+    outputs = llm.generate(prompts, sampling_params=sampling_params, use_tqdm=True)
 
     responses = [out.outputs[0].text.strip() for out in outputs]
 
