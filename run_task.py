@@ -135,21 +135,61 @@ llm = AutoModelForCausalLM.from_pretrained(
     print("Model loaded.")
 
 
-    prompts = []
-    for item in data:
-        system, user = build_prompt(item["question"], item.get("options"))
-        prompt_text = tokenizer.apply_chat_template(
-            [{"role": "system", "content": system},
-            {"role": "user",   "content": user}],
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-        prompts.append(prompt_text)
+    #prompts = []
+    #for item in data:
+        #system, user = build_prompt(item["question"], item.get("options"))
+        #prompt_text = tokenizer.apply_chat_template(
+            #[{"role": "system", "content": system},
+            #{"role": "user",   "content": user}],
+            #tokenize=False,
+            #add_generation_prompt=True,
+        #)
+        #prompts.append(prompt_text)
 
-    print(f"Generating responses for {len(prompts)} questions...")
-    outputs = llm.generate(prompts, sampling_params=sampling_params)
+    #print(f"Generating responses for {len(prompts)} questions...")
+    #outputs = llm.generate(prompts, sampling_params=sampling_params)
 
-    responses = [out.outputs[0].text.strip() for out in outputs]
+    #responses = [out.outputs[0].text.strip() for out in outputs]
+
+# # Build prompts for first 5 entries
+ prompts = []
+ for item in data[:5]:
+     system, user = build_prompt(item["question"], item.get("options"))
+     prompt_text = tokenizer.apply_chat_template(
+         [{"role": "system", "content": system},
+          {"role": "user",   "content": user}],
+         tokenize=False,
+         add_generation_prompt=True,
+     )
+     prompts.append(prompt_text)
+
+   #Tokenize (padded batch)
+ print(f"Generating responses for {len(prompts)} questions...")
+ inputs = tokenizer(
+     prompts,
+     return_tensors="pt",
+     padding=True,
+     truncation=True,
+     max_length=16384,
+ ).to(llm.device)
+
+ # Generate
+ with torch.no_grad():
+     output_ids = llm.generate(
+         **inputs,
+         max_new_tokens=MAX_TOKENS,
+         temperature=0.6,
+         top_p=0.95,
+         top_k=20,
+         repetition_penalty=1.0,
+         do_sample=True,
+     )
+
+# Decode only the new tokens (strip the prompt)
+ responses = []
+ for i, out in enumerate(output_ids):
+     new_tokens = out[inputs["input_ids"].shape[1]:]
+     responses.append(tokenizer.decode(new_tokens, skip_special_tokens=True).strip())
 
 
     def extract_letter(text: str) -> str:
