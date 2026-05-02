@@ -91,17 +91,36 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     tokenizer.pad_token = tokenizer.eos_token
 
-    llm = LLM(
-        model=MODEL_ID,
-        quantization="bitsandbytes",
-        load_format="bitsandbytes",
-        enable_prefix_caching=False,
-        gpu_memory_utilization=0.9,
-        max_model_len=10240,
-        trust_remote_code=True,
-        max_num_seqs=16,
-        disable_log_stats=False,
-    )
+    #llm = LLM(
+        #model=MODEL_ID,
+        #quantization="bitsandbytes",
+        #load_format="bitsandbytes",
+        #enable_prefix_caching=False,
+        #gpu_memory_utilization=0.9,
+        #max_model_len=10240,
+        #trust_remote_code=True,
+        #max_num_seqs=16,
+        #disable_log_stats=False,
+    #)
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+
+MODEL_ID = "Qwen/Qwen3-4B-Thinking-2507"
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
+tokenizer.pad_token = tokenizer.eos_token
+
+bnb_config = BitsAndBytesConfig(
+load_in_4bit=True,
+bnb_4bit_compute_dtype=torch.bfloat16,
+bnb_4bit_use_double_quant=True,
+)
+
+llm = AutoModelForCausalLM.from_pretrained(
+     MODEL_ID,
+    trust_remote_code=True,
+    quantization_config=bnb_config,
+    device_map="auto",
+)
 
     sampling_params = SamplingParams(
         max_tokens=MAX_TOKENS,
