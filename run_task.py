@@ -39,7 +39,7 @@ def main():
         project="cse151b",
         group="exp-02-prompts",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-01prompt-200q",
+        name="eval-02prompt-200q",
         tags=["prompts", "public-data"],
         config={
             "model_id": MODEL_ID,
@@ -57,23 +57,30 @@ def main():
 
 
     SYSTEM_PROMPT_MATH = (
-        "You are an expert mathematician. Solve the problem step-by-step inside <think> tags. "
-        "Put your final answer inside \\boxed{}. "
+        "You are an expert mathematician.\n"
+        "Use concise symbolic reasoning inside <think> tags. "
+        "Focus only on essential equations, derivations, and computations. "
+        "Avoid conversational text, repetition, and unnecessary verification.\n"
+        "Output the final answer inside a single \\boxed{}.\n"
         "CRITICAL FORMATTING RULES:\n"
-        "1. NO UNITS: Never include units (e.g., 'feet', 'cm', '$') or labels (e.g., 'x =') inside the \\boxed{} tag.\n"
-        "2. MULTIPLE ANSWERS: If the problem has multiple sub-answers, separate them by commas inside a single box, e.g., \\boxed{3, 7}.\n"
-        "3. COORDINATES & INTERVALS: Always include the enclosing parentheses or brackets, e.g., \\boxed{(2, -2)}.\n"
-        "4. EXACT FORM & DECIMALS: Default to exact symbolic forms (simplified fractions, \\pi, radicals). "
-        "If the problem explicitly asks for a decimal, you MUST provide it to at least 6 decimal places (e.g., \\boxed{3.141592}).\n"
-        "BEHAVIORAL RULE: Keep your <think> block brief and mathematically dense. Focus strictly on core equations and derivations. Do not write paragraphs of conversational text."
+        "1. Do not include units or labels inside \\boxed{}.\n"
+        "2. If the problem has multiple sub-answers, separate answers with commas inside one box, e.g., \\boxed{3, 7}.\n"
+        "3. Preserve required parentheses, brackets, and interval notation, e.g., \\boxed{(2, -2)}.\n"
+        "4. Prefer exact symbolic forms. If you are to use decimals, you MUST provide the answer to at least 6 decimal place.\n"
+        "5. Do not output anything after the final boxed answer."
     )
 
     SYSTEM_PROMPT_MCQ = (
-        "You are an expert mathematician. Solve the problem step-by-step inside <think> tags. "
-        "Read the answer choices and select the single best answer. "
-        "CRITICAL FORMATTING RULE: Output ONLY the single uppercase letter of your chosen option inside \\boxed{}. "
-        "Do not include the mathematical value, decimals, or any punctuation inside the box. Example: \\boxed{C}.\n"
-        "BEHAVIORAL RULE: Keep your <think> block brief and mathematically dense. Use high-precision math (calculating to at least 6 decimals if necessary) to logically eliminate wrong options quickly without rambling."
+        "You are an expert mathematician.\n"
+        "Solve the problem using concise internal reasoning inside <think> tags. "
+        "Keep reasoning minimal, precise, and computation-focused.\n"
+        "Then output ONLY the final multiple-choice answer as a single uppercase letter inside \\boxed{}.\n"
+        "CRITICAL FORMATTING RULES:\n"
+        "- Output exactly one boxed uppercase letter.\n"
+        "- Example: \\boxed{C}\n"
+        "- Do not output the answer text or numeric value.\n"
+        "- Do not include punctuation inside the box.\n"
+        "- Do not output anything after the boxed answer."
     )
 
     def build_prompt(question: str, options: Optional[list]) -> tuple[str, str]:
