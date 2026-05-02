@@ -34,7 +34,7 @@ def main():
     wandb.init(
         entity="dame-dolla",
         project="cse151b",
-        group="exp-00-baselines",
+        group="exp-02-prompts",
         job_type="evaluate" if evaluation else "inference",
         name="infer-base",
         tags=["baseline", "private-data"],
