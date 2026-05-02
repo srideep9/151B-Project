@@ -12,6 +12,7 @@ from transformers import AutoTokenizer
 from tqdm import tqdm
 
 from judger import Judger
+from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 
 def main():
@@ -102,7 +103,6 @@ def main():
         #max_num_seqs=16,
         #disable_log_stats=False,
     #)
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 MODEL_ID = "Qwen/Qwen3-4B-Thinking-2507"
 
