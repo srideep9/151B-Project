@@ -39,8 +39,8 @@ def main():
         project="cse151b",
         group="exp-02-prompts",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-04prompt-200q",
-        tags=["prompts", "public-data"],
+        name="infer-04prompt",
+        tags=["prompts", "private-data"],
         config={
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
