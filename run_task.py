@@ -39,7 +39,7 @@ def main():
         project="cse151b",
         group="exp-02-prompts",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-03prompt-200q",
+        name="eval-04prompt-200q",
         tags=["prompts", "public-data"],
         config={
             "model_id": MODEL_ID,
@@ -58,28 +58,30 @@ def main():
 
     SYSTEM_PROMPT_MATH = (
         "You are an expert mathematician.\n"
-        "Use concise symbolic reasoning inside <think> tags. "
-        "Focus only on essential equations, derivations, and computations. "
-        "Avoid conversational text, repetition, and unnecessary verification.\n"
-        "Output the final answer inside a single \\boxed{}.\n"
+        "Solve the problem using extremely concise internal reasoning inside <think> tags. "
+        "Keep reasoning minimal, precise, and computation-focused. "
+        "Avoid any conversational text, repetition, and unnecessary verification. No explanations or narrative sentences.\n"
+        "Then output the final answer(s) inside a single \\boxed{}.\n"
         "CRITICAL FORMATTING RULES:\n"
-        "1. Do not include units or labels inside \\boxed{}.\n"
-        "2. If the problem has multiple sub-answers, separate answers with commas inside one box, e.g., \\boxed{3, 7}.\n"
-        "3. Preserve required parentheses, brackets, and interval notation, e.g., \\boxed{(2, -2)}.\n"
-        "4. Prefer exact symbolic forms. If you are to use decimals, you MUST provide the answer to at least 6 decimal place.\n"
-        "5. Do not output anything after the final boxed answer."
+        "- Do not include units or labels inside \\boxed{}.\n"
+        "- If the problem has multiple sub-answers or multiple [ANS] blanks, output the answers in the exact order they are requested, separated by commas, inside one box, e.g., \\boxed{3, 7, yes}.\n"
+        "- Preserve required parentheses, brackets, and interval notation, e.g., \\boxed{(2, -2)}.\n"
+        "- Always prefer exact symbolic forms for answers, no matter the type of question being asked. If a decimal is required, you MUST provide the answer to at least 6 decimal place.\n"
+        "- NEVER debate or second-guess formatting expectations inside the <think> tags. Once you have derived the required values, immediately output the \\boxed{} and stop.\n"
+        "- Do not output anything after the boxed answer."
     )
 
     SYSTEM_PROMPT_MCQ = (
         "You are an expert mathematician.\n"
-        "Solve the problem using concise internal reasoning inside <think> tags. "
-        "Keep reasoning minimal, precise, and computation-focused.\n"
-        "Then output ONLY the final multiple-choice answer as a single uppercase letter inside \\boxed{}.\n"
+        "Solve the problem using extremely concise internal reasoning inside <think> tags. "
+        "Keep reasoning minimal, precise, and computation-focused. "
+        "Avoid any conversational text, repetition, and unnecessary verification. No explanations or narrative sentences.\n"
+        "Then output ONLY the final multiple-choice answer as a single uppercase letter inside a \\boxed{}.\n"
         "CRITICAL FORMATTING RULES:\n"
-        "- Output exactly one boxed uppercase letter.\n"
-        "- Example: \\boxed{C}\n"
+        "- Output exactly one boxed uppercase letter as your answer, e.g., \\boxed{C}\n"
         "- Do not output the answer text or numeric value.\n"
         "- Do not include punctuation inside the box.\n"
+        "- NEVER debate or second-guess formatting expectations inside the <think> tags. Once you derive the answer, immediately output the \\boxed{} letter and stop.\n"
         "- Do not output anything after the boxed answer."
     )
 
@@ -217,7 +219,7 @@ Comparing this derived array [4, 8, 12] to the given options.
 Matches option A.
 </think>
 \boxed{A}"""}
-]
+    ]
 
     prompts = []
     for item in data:
