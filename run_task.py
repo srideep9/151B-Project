@@ -39,7 +39,7 @@ def main():
         project="cse151b",
         group="exp-02-prompts",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-02prompt-200q",
+        name="eval-03prompt-200q",
         tags=["prompts", "public-data"],
         config={
             "model_id": MODEL_ID,
@@ -123,12 +123,107 @@ def main():
         data = data[:args.num_samples]
         print(f"Using only the first {args.num_samples} questions for evaluation.")
 
+    def build_messages(question: str, options: Optional[list]) -> list:
+        """Return a full message history (Few-Shot + current question)."""
+        if options:
+            # Build the exact MCQ user prompt format
+            labels    = [chr(65 + i) for i in range(len(options))]
+            opts_text = "\n".join(f"{lbl}. {opt.strip()}" for lbl, opt in zip(labels, options))
+            user_text = f"{question}\n\nOptions:\n{opts_text}"
+            messages = list(few_shot_history_mcq)
+            messages.append({"role": "user", "content": user_text})
+            return messages
+        else:
+            # Copy the Math history and append the real question
+            messages = list(few_shot_history_math)
+            messages.append({"role": "user", "content": question})
+            return messages
+
+
+    few_shot_history_math = [
+        {"role": "system", "content": SYSTEM_PROMPT_MATH},
+        {"role": "user", "content": "Evaluate the definite integral $\\int_0^1 x e^x \\, dx$."},
+        {"role": "assistant", "content": r"""<think>
+Use integration by parts: \int u \, dv = uv - \int v \, du.
+Let u = x, dv = e^x dx.
+Then du = dx, v = e^x.
+\int x e^x dx = x e^x - \int e^x dx = x e^x - e^x.
+Evaluate from 0 to 1:
+Upper bound (x=1): 1 \cdot e^1 - e^1 = e - e = 0.
+Lower bound (x=0): 0 \cdot e^0 - e^0 = 0 - 1 = -1.
+Result: 0 - (-1) = 1.
+</think>
+\boxed{1}"""},
+        {"role": "user", "content": "Given the real part $u(x, y) = e^x \\cos(y)$ of an analytic function $f(z) = u + \\mathrm{i} v$, find $f(z)$ in terms of $z$ if $f(0) = 1$."},
+        {"role": "assistant", "content": r"""<think>
+Use Milne-Thomson method: f'(z) = u_x(z, 0) - \mathrm{i} u_y(z, 0).
+u(x, y) = e^x \cos(y)
+u_x(x, y) = e^x \cos(y) \implies u_x(z, 0) = e^z \cos(0) = e^z
+u_y(x, y) = -e^x \sin(y) \implies u_y(z, 0) = -e^z \sin(0) = 0
+f'(z) = e^z - \mathrm{i}(0) = e^z
+Integrate with respect to z: f(z) = e^z + C.
+Apply condition: f(0) = 1 \implies e^0 + C = 1 \implies C = 0.
+f(z) = e^z.
+</think>
+\boxed{e^z}"""},
+        {"role": "user", "content": "A test has $H_0: \\mu = 50$ vs $H_a: \\mu < 50$. Sample size $n=16$, sample mean $48$, standard deviation $4$. Find: A. Test statistic. B. Rejection region for $\\alpha=0.05$."},
+        {"role": "assistant", "content": r"""<think>
+t = \frac{\bar{x} - \mu_0}{s / \sqrt{n}}
+t = \frac{48 - 50}{4 / \sqrt{16}} = \frac{-2}{1} = -2.
+df = 15. Left-tailed test, \alpha = 0.05. Critical t_{0.05, 15} = -1.753.
+Rejection region: (-\infty, -1.753).
+</think>
+\boxed{-2, (-\infty, -1.753)}"""}
+    ]
+
+    few_shot_history_mcq = [
+        {"role": "system", "content": SYSTEM_PROMPT_MCQ},
+        
+        # --- Example 1: Complex Analysis (Contour Integration) ---
+        {"role": "user", "content": "Evaluate the contour integral $\\oint_{|z|=2} \\frac{e^z}{z(z-1)^2} \\mathrm{d}z$ where the contour is oriented counterclockwise.\n\nOptions:\nA. $$2\\pi i e$$\nB. $$2\\pi i (e - 1)$$\nC. $$2\\pi i$$\nD. $$0$$\nE. $$-2\\pi i$$\nF. $$4\\pi i e$$\nG. $$\\pi i$$\nH. $$\\pi i e$$\nI. $$2\\pi i (e+1)$$\nJ. $$-2\\pi i e$$"},
+        {"role": "assistant", "content": r"""<think>
+Identify singularities: simple pole at z = 0, and a pole of order 2 at z = 1.
+Both poles lie inside the contour |z| = 2.
+Residue at z = 0: \lim_{z \to 0} z \frac{e^z}{z(z-1)^2} = \frac{e^0}{(-1)^2} = 1.
+Residue at z = 1: \lim_{z \to 1} \frac{d}{dz} \left[ (z-1)^2 \frac{e^z}{z(z-1)^2} \right] = \lim_{z \to 1} \frac{d}{dz} \left( \frac{e^z}{z} \right).
+Derivative using quotient rule: \frac{z e^z - e^z}{z^2}.
+Evaluate at z = 1: \frac{1 \cdot e^1 - e^1}{1^2} = 0.
+Sum of residues: 1 + 0 = 1.
+By Cauchy's Residue Theorem: \oint = 2\pi i \sum \text{Res} = 2\pi i (1) = 2\pi i.
+Matches option C.
+</think>
+\boxed{C}"""},
+    # --- Example 2: Differential Equations (Orthogonal Trajectories) ---
+        {"role": "user", "content": "Find the family of orthogonal trajectories to the family of parabolas $y = c x^2$.\n\nOptions:\nA. $$x^2 - 2y^2 = C$$\nB. $$x^2 + y^2 = C$$\nC. $$x^2 + 2y^2 = C$$\nD. $$2x^2 + y^2 = C$$\nE. $$x^2 + 4y^2 = C$$\nF. $$x^2 - y^2 = C$$\nG. $$2x^2 - y^2 = C$$\nH. $$x^2 + y = C$$\nI. $$x + y^2 = C$$\nJ. $$x^2 y = C$$"},
+        {"role": "assistant", "content": r"""<think>
+Differentiate y = cx^2 with respect to x: y' = 2cx.
+Eliminate the parameter c using the original equation c = y/x^2.
+Substitute c into the derivative: y' = 2(y/x^2)x = \frac{2y}{x}.
+The differential equation of the original family is y' = \frac{2y}{x}.
+For the orthogonal trajectories, replace y' with -1/y'.
+\frac{-1}{y'} = \frac{2y}{x} \implies y' = \frac{-x}{2y}.
+Separate variables: 2y dy = -x dx.
+Integrate both sides: \int 2y dy = \int -x dx \implies y^2 = -\frac{x^2}{2} + K.
+Multiply by 2: 2y^2 = -x^2 + 2K \implies x^2 + 2y^2 = C.
+Matches option C.
+</think>
+\boxed{C}"""},
+        # --- Example 3: Sequence/Algorithm Generation ---
+        {"role": "user", "content": "We now define an algorithm: The definition of a(n) is the coordination sequence for a specific lattice. Given the input x_list: [1, 2, 3], determine the corresponding output sequence y_list.\n\nOptions:\nA. [4, 8, 12]\nB. [4, 9, 14]\nC. [6, 12, 18]\nD. [6, 18, 38]\nE. [8, 16, 24]"},
+        {"role": "assistant", "content": r"""<think>
+The problem asks to match the specific algorithm's output sequence to the given options for x = 1, 2, 3.
+By analyzing the sequence generation properties for the requested lattice, the values grow sequentially as 4, 8, 12.
+Comparing this derived array [4, 8, 12] to the given options.
+Matches option A.
+</think>
+\boxed{A}"""}
+]
+
     prompts = []
     for item in data:
-        system, user = build_prompt(item["question"], item.get("options"))
+        messages = build_messages(item["question"], item.get("options"))
         prompt_text = tokenizer.apply_chat_template(
-            [{"role": "system", "content": system},
-            {"role": "user",   "content": user}],
+            messages,
             tokenize=False,
             add_generation_prompt=True,
         )
