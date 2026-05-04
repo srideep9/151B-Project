@@ -18,6 +18,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval", type=bool, default=False, help="Whether this is evaluation (public) or inference (private) run")
     parser.add_argument("--num_samples", type=int, default=None, help="Limit the number of questions to process")
+    parser.add_argument("--num_outputs", type=int, default=1, help="Number of output generations per question")
     parser.add_argument("--output_path", type=str, required=True, help="Path to save the JSONL results")
     parser.add_argument("--temperature", type=float, default=0, help="Temperature for sampling")
     parser.add_argument("--top_p", type=float, default=0.95, help="Top-p for sampling")
@@ -37,10 +38,10 @@ def main():
     wandb.init(
         entity="dame-dolla",
         project="cse151b",
-        group="exp-02-prompts",
+        group="exp-03-voting",
         job_type="evaluate" if evaluation else "inference",
-        name="infer-04prompt",
-        tags=["prompts", "private-data"],
+        name="eval-01vote-200q",
+        tags=["voting", "public-data"],
         config={
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
@@ -105,7 +106,7 @@ def main():
         gpu_memory_utilization=0.9,
         max_model_len=8192,
         trust_remote_code=True,
-        max_num_seqs=16,
+        max_num_seqs=32,
         disable_log_stats=False,
     )
 
@@ -115,6 +116,7 @@ def main():
         top_p=args.top_p,
         top_k=20,
         min_p=0.0,
+        n=args.num_outputs,
         presence_penalty=0.0,
         repetition_penalty=1.0,
     )
@@ -128,7 +130,6 @@ def main():
     def build_messages(question: str, options: Optional[list]) -> list:
         """Return a full message history (Few-Shot + current question)."""
         if options:
-            # Build the exact MCQ user prompt format
             labels    = [chr(65 + i) for i in range(len(options))]
             opts_text = "\n".join(f"{lbl}. {opt.strip()}" for lbl, opt in zip(labels, options))
             user_text = f"{question}\n\nOptions:\n{opts_text}"
@@ -136,7 +137,6 @@ def main():
             messages.append({"role": "user", "content": user_text})
             return messages
         else:
-            # Copy the Math history and append the real question
             messages = list(few_shot_history_math)
             messages.append({"role": "user", "content": question})
             return messages
@@ -233,8 +233,90 @@ Matches option A.
 
     print(f"Generating responses for {len(prompts)} questions...")
     outputs = llm.generate(prompts, sampling_params=sampling_params, use_tqdm=True)
+    print("Generation complete.")
 
-    responses = [out.outputs[0].text.strip() for out in outputs]
+    judger = Judger(strict_extract=False)
+
+    def compare_predictions(pred1: str, pred2: str) -> bool:
+        list1 = judger.split_by_comma(pred1)
+        list2 = judger.split_by_comma(pred2)
+        
+        if len(list1) != len(list2):
+            return False
+            
+        for item1, item2 in zip(list1, list2):
+            norm1 = judger.norm_ans_str(item1)
+            norm2 = judger.norm_ans_str(item2)
+            
+            if not judger.is_equal(norm1, norm2):
+                return False
+                
+        return True
+
+    def get_mathematical_majority_vote(responses: list[str]) -> str:
+        """
+        Takes N model responses, groups them by multi-part mathematical equivalence, 
+        and returns the shortest winning reasoning trace.
+        """
+        extracted_data = []
+        
+        for resp in responses:
+            ans = judger.extract_ans(resp)
+            if ans:
+                extracted_data.append({
+                    "raw_extracted": ans, 
+                    "raw_response": resp
+                })
+                    
+        if not extracted_data:
+            return responses[0]
+            
+        equivalence_groups = []
+        
+        for item in extracted_data:
+            ans = item["raw_extracted"]
+            raw_text = item["raw_response"]
+            matched = False
+            
+            for group in equivalence_groups:
+                if compare_predictions(ans, group["representative"]):
+                    group["count"] += 1
+                    group["raw_responses"].append(raw_text)
+                    matched = True
+                    break
+                    
+            if not matched:
+                equivalence_groups.append({
+                    "representative": ans, 
+                    "count": 1, 
+                    "raw_responses": [raw_text]
+                })
+                
+        # tie breaker goes to shorter answers
+        best_group = max(
+            equivalence_groups, 
+            key=lambda x: (
+                x["count"], 
+                -len(min(x["raw_responses"], key=len)) 
+            )
+        )
+        
+        representative_trace = min(best_group["raw_responses"], key=len)
+        
+        return representative_trace
+    
+    print("Running Mathematical Majority Voting...")
+
+    responses = []
+
+    for out in outputs:
+        generated_texts = [comp.text.strip() for comp in out.outputs]
+        
+        winning_trace = get_mathematical_majority_vote(generated_texts)
+        
+        responses.append(winning_trace)
+
+    print("Voting complete!")
 
 
     def extract_letter(text: str) -> str:
@@ -248,7 +330,6 @@ Matches option A.
         return extract_letter(response) == gold_letter.strip().upper()
 
     sys.path.insert(0, ".")
-    judger = Judger(strict_extract=False) 
 
     results = []
 
