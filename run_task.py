@@ -22,6 +22,8 @@ def main():
     parser.add_argument("--output_path", type=str, required=True, help="Path to save the JSONL results")
     parser.add_argument("--temperature", type=float, default=0, help="Temperature for sampling")
     parser.add_argument("--top_p", type=float, default=0.95, help="Top-p for sampling")
+    parser.add_argument("--max_tokens", type=int, default=4096, help="Maximum number of tokens to generate")
+    parser.add_argument("--max_num_seqs", type=int, default=128, help="Maximum number of sequences to generate in parallel")
     args = parser.parse_args()
 
     evaluation = args.eval
@@ -30,7 +32,7 @@ def main():
     GPU_ID      = "0"
     DATA_PATH   = "data/public.jsonl" if evaluation else "data/private.jsonl"
     OUTPUT_PATH = args.output_path
-    MAX_TOKENS  = 4096
+    MAX_TOKENS  = args.max_tokens
 
     os.environ["CUDA_VISIBLE_DEVICES"] = GPU_ID
 
@@ -96,9 +98,9 @@ def main():
         load_format="bitsandbytes",
         enable_prefix_caching=False,
         gpu_memory_utilization=0.9,
-        max_model_len=12288,
+        max_model_len=MAX_TOKENS + 4096,
         trust_remote_code=True,
-        max_num_seqs=128,
+        max_num_seqs=args.max_num_seqs,
         disable_log_stats=False,
     )
 
