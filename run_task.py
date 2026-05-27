@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+import signal
 import wandb
 import pandas as pd
 from pathlib import Path
@@ -13,6 +14,11 @@ from tqdm import tqdm
 
 from judger import Judger
 
+class TimeoutException(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutException("Sympy evaluation took too long.")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -22,8 +28,8 @@ def main():
     parser.add_argument("--output_path", type=str, required=True, help="Path to save the JSONL results")
     parser.add_argument("--temperature", type=float, default=0, help="Temperature for sampling")
     parser.add_argument("--top_p", type=float, default=0.95, help="Top-p for sampling")
-    parser.add_argument("--max_tokens", type=int, default=4096, help="Maximum number of tokens to generate")
-    parser.add_argument("--max_num_seqs", type=int, default=128, help="Maximum number of sequences to generate in parallel")
+    parser.add_argument("--max_tokens", type=int, default=8192, help="Maximum number of tokens to generate")
+    parser.add_argument("--max_num_seqs", type=int, default=64, help="Maximum number of sequences to generate in parallel")
     args = parser.parse_args()
 
     evaluation = args.eval
@@ -40,10 +46,10 @@ def main():
     wandb.init(
         entity="dame-dolla",
         project="cse151b",
-        group="exp-02-prompts",
+        group="exp-03-voting",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-05prompt-200q",
-        tags=["prompts", "public-data"],
+        name="eval-01vote",
+        tags=["voting", "public-data"],
         config={
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
@@ -96,7 +102,7 @@ def main():
         model=MODEL_ID,
         quantization="bitsandbytes",
         load_format="bitsandbytes",
-        enable_prefix_caching=False,
+        enable_prefix_caching=True,
         gpu_memory_utilization=0.9,
         max_model_len=MAX_TOKENS + 4096,
         trust_remote_code=True,
@@ -231,7 +237,7 @@ Matches option A.
 
     judger = Judger(strict_extract=False)
 
-    def compare_predictions(pred1: str, pred2: str) -> bool:
+    def compare_predictions(pred1: str, pred2: str, timeout_sec=4) -> bool:
         list1 = judger.split_by_comma(pred1)
         list2 = judger.split_by_comma(pred2)
         
@@ -241,8 +247,25 @@ Matches option A.
         for item1, item2 in zip(list1, list2):
             norm1 = judger.norm_ans_str(item1)
             norm2 = judger.norm_ans_str(item2)
+
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(timeout_sec)
+
+            try:
+                is_match = judger.is_equal(norm1, norm2)
             
-            if not judger.is_equal(norm1, norm2):
+            except TimeoutException:
+                print(f"\n[WARNING] Sympy Timeout: Abandoned comparison of '{norm1}' and '{norm2}'")
+                is_match = False
+
+            except Exception as e:
+                print(f"\n[WARNING] Judger Crash: {e}")
+                is_match = False
+
+            finally:
+                signal.alarm(0)
+
+            if not is_match:
                 return False
                 
         return True
@@ -303,12 +326,13 @@ Matches option A.
 
     responses = []
 
-    for out in outputs:
+    for idx, out in enumerate(outputs):
         generated_texts = [comp.text.strip() for comp in out.outputs]
         
         winning_trace = get_mathematical_majority_vote(generated_texts)
         
         responses.append(winning_trace)
+        print(f"Processed {idx+1}/{len(outputs)} questions")
 
     print("Voting complete!")
 
