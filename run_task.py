@@ -100,8 +100,7 @@ def main():
 
     llm = LLM(
         model=MODEL_ID,
-        quantization="bitsandbytes",
-        load_format="bitsandbytes",
+        dtype="bfloat16",
         enable_prefix_caching=True,
         gpu_memory_utilization=0.9,
         max_model_len=MAX_TOKENS + 4096,
