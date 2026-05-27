@@ -38,10 +38,10 @@ def main():
     wandb.init(
         entity="dame-dolla",
         project="cse151b",
-        group="exp-03-voting",
+        group="exp-02-prompts",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-01vote-200q",
-        tags=["voting", "public-data"],
+        name="eval-05prompt-200q",
+        tags=["prompts", "public-data"],
         config={
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
@@ -58,7 +58,7 @@ def main():
 
 
     SYSTEM_PROMPT_MATH = (
-        "You are an expert mathematician.\n"
+        "You are an MIT mathematician.\n"
         "Solve the problem using extremely concise internal reasoning inside <think> tags. "
         "Keep reasoning minimal, precise, and computation-focused. "
         "Avoid any conversational text, repetition, and unnecessary verification. No explanations or narrative sentences.\n"
@@ -73,7 +73,7 @@ def main():
     )
 
     SYSTEM_PROMPT_MCQ = (
-        "You are an expert mathematician.\n"
+        "You are an MIT mathematician.\n"
         "Solve the problem using extremely concise internal reasoning inside <think> tags. "
         "Keep reasoning minimal, precise, and computation-focused. "
         "Avoid any conversational text, repetition, and unnecessary verification. No explanations or narrative sentences.\n"
@@ -85,14 +85,6 @@ def main():
         "- NEVER debate or second-guess formatting expectations inside the <think> tags. Once you derive the answer, immediately output the \\boxed{} letter and stop.\n"
         "- Do not output anything after the boxed answer."
     )
-
-    def build_prompt(question: str, options: Optional[list]) -> tuple[str, str]:
-        """Return (system_prompt, user_prompt) for a question."""
-        if options:
-            labels    = [chr(65 + i) for i in range(len(options))]
-            opts_text = "\n".join(f"{lbl}. {opt.strip()}" for lbl, opt in zip(labels, options))
-            return SYSTEM_PROMPT_MCQ, f"{question}\n\nOptions:\n{opts_text}"
-        return SYSTEM_PROMPT_MATH, question
     
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
@@ -104,9 +96,9 @@ def main():
         load_format="bitsandbytes",
         enable_prefix_caching=False,
         gpu_memory_utilization=0.9,
-        max_model_len=8192,
+        max_model_len=12288,
         trust_remote_code=True,
-        max_num_seqs=32,
+        max_num_seqs=128,
         disable_log_stats=False,
     )
 
