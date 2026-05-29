@@ -173,18 +173,16 @@ Finally, \textbf{evaluation} is particularly challenging because mathematical re
 
 
 \paragraph{Contributions.}
- \textcolor{red}{TODO} On a high level, explain what the starter code does and what its limitations/issues are. Describe how your current solution effectively addresses (some) of these limitations/issues. Be very precise and clear. Any empirical claims must be justified by your results. You may find it useful to explicitly enumerate your key contributions (e.g., a better architecture/loss function or a more suitable problem/data setup relative to the starter code, an insightful finding/result, an innovative technique or combination of existing techniques, etc.) as follows:
 
-% Find and cite (use \href{https://www.overleaf.com/learn/latex/Bibliography_management_with_bibtex}{BibTex
-% }) state-of-the-art works or papers that have tried to solve a similar problem (use \href{https://scholar.google.com/}{Google Scholar} to search). Point out the limitations of the state-of-the-art.
+The starter code loads up the dataset of math problems, formats them into prompts for the model, and runs a pretrained LLM on them to generate answers. It then extracts and checks those answers, scoring them and calculating accuracy. There are many limitations, but here are a few: LLM math errors, bad answer formatting, over-computation on arithmetic/logic(along with quality degradation), and repetition traps. Currently, our solution implements the following:
+\begin{enumerate}
+    \item \textbf{Greedy decoding} with T = 0.0 - This is standard for math reasoning, but we evaluated this experimentally to ensure it was best.
+    \item \textbf{Prompt Engineering} - Added rules about keeping thinking concise(to avoid over-computation and looping), prohibiting formatting debates(to maintain a consistent format), and a decisiveness protocol(to reduce recursive self-validation).
+    \item \textbf{Full set evaluation and token-truncation} - Reducing the cap on tokens allows for increased inference speed, stabilized outputs, and less formatting rambling. While we think this is detrimental for ~5\% of the problems (the most difficult ones), we think this is an overall helpful change for now.
+    \item \textbf{Dataset analysis} - Failure analysis shows us that the model is doing better than it predicts. There are many false negatives presented by the evaluation pipeline, leading us to belive accuracy is higher than reported.
+\end{enumerate}
 
-
-Our main contributions are:
-\begin{itemize}
-  \item Contribution A: ...
-  \item Contribution B: ...  
-    % etc.
-\end{itemize}
+Our next steps are to implement a problem classifier, to further provide prompt engineering based on problem domain(algebra, calculus, probability, etc.), and to implement advanced inference scaling, through majority voting and self-consistency. This will allow the model to explore multiple reasoning trajectories per problem and choose the majority result.
 
 % % % === Related Work
 \section{Related Work (Optional)}
@@ -198,12 +196,29 @@ Describe related papers and contextualize your own work with respect to them. If
 % % % === Methods
 \section{Methods}
 \label{sec:methods}
-\textcolor{red}{TODO} In this section, clearly describe the technical details of the problem and your approach. If needed, provide the necessary background and cite any sources that you used.
+In this section, clearly describe the technical details of the problem and your approach. If needed, provide the necessary background and cite any sources that you used.
 
 
 \paragraph{Problem Setting.}
-\textcolor{red}{TODO} Introduce the problem. Formulate your prediction task as an optimization problem and write out the objective (i.e., loss function) that you use to train your model. Describe the dataset. Define the inputs and outputs in mathematical language, describing their meaning in natural language. \textbf{Note:} \textit{The inputs and outputs here should correspond to what your model actually ingests and predicts, respectively}. 
 
+The goal of this project is to improve the mathematical reasoning performance of a small (~4B parameter) language model under strict inference constraints. Given a mathematical problem, the model must generate a correct and properly formatted final answer without access to external tools or APIs. A key challenge is that the model must not only reason correctly, but also avoid common failure modes such as excessive computation, formatting errors, and truncated outputs.
+
+\textbf{Optimization objective:}
+The model is trained (or fine-tuned) to minimize the negative log-likelihood of the target output sequence:
+$$\mathcal{L}_{LM}(\theta)=- \sum^N_{i=1} \sum^{T_i}_{i=1} \text{log} \space p_\theta\left( y_{i,t} | y_{i, <t}, x_i\right)$$
+where $y_{i, t}$ is the $t$-th token of the sequence and $T_i$ is the sequence length.
+
+The \textbf{dataset} is a mixture of mathematical benchmarks, spanning from high school to graduate level problems. These problems cover multiple domains of math and answer formats.
+
+We formulate this as a supervised sequence prediction problem. We are working on a lightweight classification step for prompt selection.
+\begin{enumerate}
+    \item \textbf{Input:} Our input is a dataset of natural language math problems. Let a dataset consist of $N$ examples.
+    $$\mathcal{D} = \{(x_i, y_i)\}^N_{i=1}$$
+    The input, $x_i$, is a natural language math problem. After the classifier is completed, our input will be prompted, where $x_i$ is output from a prompt construction function, $P(x)$. $$x_i = P(x_i', c_i)$$
+    where $x_i'$ is the original input and $c_i$ is the predicted problem domain(algebra, calculus, probability, etc.), which is produced by some classifier, $\mathcal{C}()$.
+    $$c_i = \mathcal{C}(x_i')$$
+    \item \textbf{Output:} Our output, $y_i$, is the correct answer string, typically a short mathematical expression (e.g., a number, symbolic expression, or multiple-choice label), formatted according to task requirements.
+\end{enumerate}
 
 \paragraph{Idea Summary.}
 \textcolor{red}{TODO} Describe and motivate your idea to solve the problem.  How is it different from the state-of-the-art method? Provide a sketch of your idea to illustrate y our idea. Is there any risk associated with your idea? Provide alternative solutions if your idea does not work out.
