@@ -65,8 +65,8 @@ it with a learned or model-based classifier later.
 
 ## Checking Routed Prompting
 
-Use this workflow on a machine with enough GPU memory to test whether topic
-routing improves model accuracy. Run both commands on the same dataset slice:
+Use this workflow to test whether topic routing improves model accuracy. 
+Run both commands on the same dataset slice:
 
 ```bash
 python3 quick_eval.py --limit 25 --prompt-mode baseline --backend transformers --output results/baseline_25.jsonl
