@@ -81,15 +81,35 @@ def transformers_generate(
     *,
     model_id: str,
     max_new_tokens: int,
+    max_input_tokens: int,
+    batch_size: int,
     temperature: float,
     top_p: float,
+    quantization: str,
 ) -> list[str]:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
+    model_kwargs = {
+        "trust_remote_code": True,
+        "device_map": "auto",
+    }
+    if quantization != "none":
+        from transformers import BitsAndBytesConfig
+
+        if quantization == "4bit":
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
+        elif quantization == "8bit":
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
+
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
 
     prompts = []
     for messages in messages_list:
@@ -103,34 +123,34 @@ def transformers_generate(
             prompt = "\n\n".join(f"{m['role'].upper()}:\n{m['content']}" for m in messages)
         prompts.append(prompt)
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        trust_remote_code=True,
-        device_map="auto",
-    )
-    inputs = tokenizer(
-        prompts,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-        max_length=4096,
-    ).to(model.device)
+    model = AutoModelForCausalLM.from_pretrained(model_id, **model_kwargs)
 
-    with torch.no_grad():
-        output_ids = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            do_sample=temperature > 0,
-            pad_token_id=tokenizer.eos_token_id,
-        )
+    responses = []
+    for start in range(0, len(prompts), batch_size):
+        batch_prompts = prompts[start: start + batch_size]
+        inputs = tokenizer(
+            batch_prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=max_input_tokens,
+        ).to(model.device)
 
-    prompt_len = inputs["input_ids"].shape[1]
-    return [
-        tokenizer.decode(output[prompt_len:], skip_special_tokens=True).strip()
-        for output in output_ids
-    ]
+        with torch.no_grad():
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                do_sample=temperature > 0,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+
+        prompt_len = inputs["input_ids"].shape[1]
+        for output in output_ids:
+            responses.append(tokenizer.decode(output[prompt_len:], skip_special_tokens=True).strip())
+
+    return responses
 
 
 def write_jsonl(path: Path, records: list[dict]) -> None:
@@ -153,14 +173,28 @@ def load_judger():
 def summarize(results: list[dict]) -> str:
     mcq = [result for result in results if result["is_mcq"]]
     free = [result for result in results if not result["is_mcq"]]
+    name_width = max(
+        10,
+        *(len(str(result["topic"])) for result in results),
+        len("Free-form"),
+    )
 
     def row(name: str, subset: list[dict]) -> str:
         total = len(subset)
         correct = sum(result["correct"] for result in subset)
         accuracy = (correct / total * 100) if total else 0.0
-        return f"{name:10s}: {correct:4d} / {total:4d} ({accuracy:6.2f}%)"
+        return f"{name:{name_width}s}: {correct:4d} / {total:4d} ({accuracy:6.2f}%)"
 
-    return "\n".join([row("MCQ", mcq), row("Free-form", free), row("Overall", results)])
+    lines = [row("MCQ", mcq), row("Free-form", free), row("Overall", results)]
+
+    topics = sorted({result["topic"] for result in results})
+    if topics:
+        lines.append("")
+        lines.append("By topic:")
+        for topic in topics:
+            lines.append(row(topic, [result for result in results if result["topic"] == topic]))
+
+    return "\n".join(lines)
 
 
 def parse_args() -> argparse.Namespace:
@@ -173,6 +207,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--offset", type=int, default=0, help="Start index in the dataset.")
     parser.add_argument("--shots", type=int, default=0, help="Few-shot examples per problem.")
     parser.add_argument(
+        "--prompt-mode",
+        choices=("baseline", "routed"),
+        default="routed",
+        help="baseline uses the starter prompt; routed adds topic hints and same-topic shots.",
+    )
+    parser.add_argument(
         "--backend",
         choices=("mock", "transformers"),
         default="mock",
@@ -184,8 +224,16 @@ def parse_args() -> argparse.Namespace:
         help="Transformers model id; only used with --backend transformers.",
     )
     parser.add_argument("--max-new-tokens", type=int, default=512)
+    parser.add_argument("--max-input-tokens", type=int, default=4096)
+    parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--top-p", type=float, default=0.95)
+    parser.add_argument(
+        "--quantization",
+        choices=("none", "4bit", "8bit"),
+        default="none",
+        help="Optional bitsandbytes quantization for the transformers backend.",
+    )
     parser.add_argument(
         "--preview-only",
         action="store_true",
@@ -196,6 +244,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.batch_size < 1:
+        raise SystemExit("--batch-size must be at least 1")
+
     data = load_jsonl(args.data)
     sample = data[args.offset: args.offset + args.limit]
     if not sample:
@@ -205,12 +256,17 @@ def main() -> None:
     prompt_records: list[dict] = []
     for item in sample:
         topic = classify_math_topic(item["question"])
-        examples = select_few_shot_examples(data, item, args.shots)
+        examples = (
+            select_few_shot_examples(data, item, args.shots)
+            if args.prompt_mode == "routed"
+            else []
+        )
         system, user = build_prompt(
             item["question"],
             item.get("options"),
             topic=topic,
             few_shot_examples=examples,
+            include_topic_hint=args.prompt_mode == "routed",
         )
         messages = [
             {"role": "system", "content": system},
@@ -222,6 +278,7 @@ def main() -> None:
             {
                 "id": item.get("id"),
                 "topic": topic.name,
+                "prompt_mode": args.prompt_mode,
                 "is_mcq": bool(item.get("options")),
                 "few_shot_ids": [example.get("id") for example in examples],
                 "prompt": prompt,
@@ -245,8 +302,11 @@ def main() -> None:
             messages_list,
             model_id=args.model_id,
             max_new_tokens=args.max_new_tokens,
+            max_input_tokens=args.max_input_tokens,
+            batch_size=args.batch_size,
             temperature=args.temperature,
             top_p=args.top_p,
+            quantization=args.quantization,
         )
 
     judger = load_judger()
@@ -257,6 +317,7 @@ def main() -> None:
             {
                 "id": item.get("id"),
                 "topic": prompt_record["topic"],
+                "prompt_mode": prompt_record["prompt_mode"],
                 "is_mcq": bool(item.get("options")),
                 "gold": item.get("answer"),
                 "response": response,

@@ -46,6 +46,32 @@ TOPICS: tuple[MathTopic, ...] = (
         ),
     ),
     MathTopic(
+        name="complex_analysis",
+        hint=(
+            "Use complex-variable structure. For analytic functions, apply the "
+            "Cauchy-Riemann equations, harmonic conjugates, and complex algebra; for "
+            "contour or residue problems, identify singularities and relevant theorems."
+        ),
+        keywords=(
+            "analytic function", "complex function", "cauchy-riemann",
+            "cauchy riemann", "harmonic conjugate", "residue", "contour",
+            "singularity", "singularities", "complex plane", "\\mathrm{i}",
+            "imaginary part", "real part", "f(z)", "u(x, y)", "u +",
+        ),
+    ),
+    MathTopic(
+        name="derivatives",
+        hint=(
+            "Differentiate carefully using product, quotient, chain, implicit, or "
+            "logarithmic differentiation as needed, then simplify the final expression."
+        ),
+        keywords=(
+            "derivative", "differentiate", "d/d", "\\frac{d", "slope of the tangent",
+            "tangent line", "rate of change", "critical point", "increasing",
+            "decreasing", "interval on which", "y^{", "y^(",
+        ),
+    ),
+    MathTopic(
         name="trigonometry",
         hint=(
             "Use trig identities and right-triangle definitions. Keep track of radians "
@@ -68,17 +94,6 @@ TOPICS: tuple[MathTopic, ...] = (
         ),
     ),
     MathTopic(
-        name="derivatives",
-        hint=(
-            "Differentiate carefully using product, quotient, chain, implicit, or "
-            "logarithmic differentiation as needed, then simplify the final expression."
-        ),
-        keywords=(
-            "derivative", "differentiate", "d/d", "\\frac{d", "slope of the tangent",
-            "tangent line", "rate of change", "critical point",
-        ),
-    ),
-    MathTopic(
         name="gradients",
         hint=(
             "Treat the expression as multivariable. Compute partial derivatives, form "
@@ -90,37 +105,84 @@ TOPICS: tuple[MathTopic, ...] = (
         ),
     ),
     MathTopic(
+        name="differential_equations",
+        hint=(
+            "Model the changing quantity with a differential equation. For growth, "
+            "decay, half-life, heating, cooling, or Newton's law problems, identify "
+            "the ambient/equilibrium value, initial condition, and time constant."
+        ),
+        keywords=(
+            "differential equation", "half-life", "half life", "population growth",
+            "population grows", "population decay", "exponential growth",
+            "exponential decay", "cooling", "heating", "newton's law",
+            "newtons law", "newton law", "ambient", "room temperature",
+            "rate of change is proportional", "temperature after",
+        ),
+    ),
+    MathTopic(
         name="algebra",
         hint=(
-            "Translate the statement into equations, simplify expressions, factor or "
-            "expand when useful, and check candidate solutions against constraints."
+            "Translate the statement into equations or arithmetic steps, simplify "
+            "expressions, factor or expand when useful, and check candidate solutions "
+            "against constraints. For simple word problems, identify the quantities, "
+            "operations, and requested unknown before solving."
         ),
         keywords=(
             "solve", "equation", "system", "polynomial", "quadratic", "linear",
             "factor", "expand", "simplify", "expression", "variable", "roots",
-            "inequality",
+            "inequality", "word problem", "total", "altogether", "how many",
+            "how much", "cost", "price", "average", "mean", "fraction", "reduce",
+            "percent", "percentage", "ratio", "proportion", "rate", "distance",
+            "speed", "work", "mixture", "age", "older", "younger", "binary numbers",
+            "binary", "simplified formula", "function below", "u(x)", "v(x)",
+            "add and subtract", "add and subtract mentally", "algorithm", "x_list",
+            "y_list", "output sequence",
+        ),
+    ),
+    MathTopic(
+        name="sequences_series",
+        hint=(
+            "Identify the sequence pattern, first term, common difference or ratio, "
+            "and number of terms. Use the finite arithmetic or geometric sum formula "
+            "when appropriate."
+        ),
+        keywords=(
+            "sequence", "series", "sum of the first", "positive even",
+            "arithmetic", "geometric", "common difference", "common ratio",
+            "terms", "nth term", "\\dots", "\\cdots", "lfloor", "floor",
+            "[ \\alpha", "\\alpha+", "remainder",
+        ),
+    ),
+    MathTopic(
+        name="statistics",
+        hint=(
+            "Organize the data or distribution information first. Compute requested "
+            "statistics such as mean, variance, standard deviation, percentiles, or "
+            "order-statistic probabilities with careful notation and rounding."
+        ),
+        keywords=(
+            "standard deviation", "variance", "percentile", "order statistics",
+            "independent observations", "continuous-type distribution", "mean",
+            "median", "mode", "quartile", "data set", "sample", "population",
+            "confidence interval", "hypothesis test", "p-value", "z-score",
+            "normal distribution", "distribution", "hypothesis", "null hypothesis",
+            "level of significance", "significance", "h_0", "h1", "h_1",
         ),
     ),
     MathTopic(
         name="probability",
         hint=(
             "Define the sample space and favorable outcomes. Use complements, "
-            "conditioning, independence, or counting formulas when appropriate."
-        ),
-        keywords=(
-            "probability", "random", "expected", "expectation", "variance",
-            "dice", "coin", "cards", "at least", "given that",
-        ),
-    ),
-    MathTopic(
-        name="combinatorics",
-        hint=(
-            "Count structures systematically. Decide whether order matters, whether "
+            "conditioning, independence, or counting formulas when appropriate. "
+            "For combinatorics-style questions, decide whether order matters, whether "
             "repetition is allowed, and whether inclusion-exclusion is needed."
         ),
         keywords=(
-            "count", "ways", "arrangements", "permutations", "combinations",
-            "choose", "binomial", "subsets", "sequences",
+            "probability", "random", "expected", "expectation", "dice", "coin",
+            "cards", "at least", "given that", "count",
+            "ways", "arrangements", "permutations", "combinations", "choose",
+            "binomial", "subsets", "how many ways", "number of ways", "arranged",
+            "without replacement", "with replacement",
         ),
     ),
 )
@@ -147,12 +209,23 @@ def classify_math_topic(question: str) -> MathTopic:
     text = question.lower()
     scores: list[tuple[int, int, MathTopic]] = []
     for order, topic in enumerate(TOPICS):
-        score = sum(1 for keyword in topic.keywords if keyword.lower() in text)
+        score = sum(1 for keyword in topic.keywords if keyword_matches(text, keyword))
         if score:
             scores.append((score, -order, topic))
     if not scores:
         return DEFAULT_TOPIC
     return max(scores, key=lambda item: (item[0], item[1]))[2]
+
+
+def keyword_matches(text: str, keyword: str) -> bool:
+    """Return True when a keyword appears as a phrase, not inside another word."""
+
+    keyword = keyword.lower()
+    if keyword.startswith("\\") or any(char in keyword for char in "_^{}"):
+        return keyword in text
+    if re.search(r"[a-z0-9]", keyword):
+        return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text) is not None
+    return keyword in text
 
 
 def format_options(options: Optional[list[str]]) -> str:
@@ -207,12 +280,14 @@ def build_prompt(
     *,
     topic: Optional[MathTopic] = None,
     few_shot_examples: Optional[list[dict]] = None,
+    include_topic_hint: bool = True,
 ) -> tuple[str, str]:
     """Return ``(system_prompt, user_prompt)`` with optional topic guidance."""
 
     topic = topic or classify_math_topic(question)
     system = SYSTEM_PROMPT_MCQ if options else SYSTEM_PROMPT_MATH
-    system = f"{system} Problem type: {topic.name}. {topic.hint}"
+    if include_topic_hint:
+        system = f"{system} Problem type: {topic.name}. {topic.hint}"
 
     options_text = format_options(options)
     target_question = f"{question}\n\nOptions:\n{options_text}" if options_text else question
