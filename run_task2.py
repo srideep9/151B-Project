@@ -21,6 +21,7 @@ LORA_ADAPTERS = {
     "public": "sdornala/qwen3-4b-public-clean-lora",
     "private": "sdornala/qwen3-4b-private-clean-lora",
     "public_private": "sdornala/qwen3-4b-public-private-clean-lora",
+    "grpo": "sdornala/qwen-4b-grpo-lora"
 }
 
 class TimeoutException(Exception):

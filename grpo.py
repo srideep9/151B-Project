@@ -152,7 +152,7 @@ def load_grpo_records(path: str) -> List[Dict[str, Any]]:
     return examples
  
 
-# REWARD FUNCTIONS
+# REWARD FUNCTION
 
  
 class TimeoutException(Exception):
