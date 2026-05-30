@@ -33,7 +33,14 @@ def main():
     parser.add_argument("--rerank", action="store_true", help="Use a verifier reranker over answer groups after generation")
     parser.add_argument("--rerank_max_tokens", type=int, default=8, help="Maximum verifier tokens per answer group")
     parser.add_argument("--rerank_temperature", type=float, default=0.0, help="Verifier sampling temperature")
+    parser.add_argument("--num_shards", type=int, default=1, help="Split the dataset into this many index-based shards")
+    parser.add_argument("--shard", type=int, default=0, help="Which shard index to run, from 0 to num_shards - 1")
     args = parser.parse_args()
+
+    if args.num_shards < 1:
+        parser.error("--num_shards must be at least 1")
+    if args.shard < 0 or args.shard >= args.num_shards:
+        parser.error("--shard must be between 0 and num_shards - 1")
 
     evaluation = args.eval
     # ── Configuration ─────────────────────────────────────────────────────────────
@@ -61,10 +68,24 @@ def main():
             "top_p": args.top_p,
             "rerank": args.rerank,
             "rerank_max_tokens": args.rerank_max_tokens,
+            "num_shards": args.num_shards,
+            "shard": args.shard,
         }
     )
 
     data = [json.loads(line) for line in open(DATA_PATH)]
+    if args.num_samples is not None:
+        data = data[:args.num_samples]
+        print(f"Using only the first {args.num_samples} questions.")
+
+    full_data_len = len(data)
+    if args.num_shards > 1:
+        data = [item for idx, item in enumerate(data) if idx % args.num_shards == args.shard]
+        print(
+            f"Using shard {args.shard}/{args.num_shards}: "
+            f"{len(data)} of {full_data_len} questions"
+        )
+
     n_mcq  = sum(bool(d.get("options")) for d in data)
     n_free = sum(not d.get("options")   for d in data)
     print(f"Loaded {len(data)} questions  ({n_mcq} MCQ, {n_free} free-form)")
@@ -126,10 +147,6 @@ def main():
     )
 
     print("Model loaded.")
-
-    if args.num_samples is not None:
-        data = data[:args.num_samples]
-        print(f"Using only the first {args.num_samples} questions for evaluation.")
 
     def build_messages(question: str, options: Optional[list]) -> list:
         """Return a full message history (Few-Shot + current question)."""
