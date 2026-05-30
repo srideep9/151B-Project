@@ -217,7 +217,7 @@ def correctness_reward_fn(
     -1.0  wrong answer
      0.0  can't parse
     """
-    # Import here — this runs inside the Modal container where judger is available
+    # Import here — this runs inside the Modal container where judger is readily available
     from judger import Judger
     jud = Judger(strict_extract=False)
  
