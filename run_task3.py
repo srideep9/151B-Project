@@ -30,6 +30,9 @@ def main():
     parser.add_argument("--top_p", type=float, default=0.95, help="Top-p for sampling")
     parser.add_argument("--max_tokens", type=int, default=8192, help="Maximum number of tokens to generate")
     parser.add_argument("--max_num_seqs", type=int, default=64, help="Maximum number of sequences to generate in parallel")
+    parser.add_argument("--rerank", action="store_true", help="Use a verifier reranker over answer groups after generation")
+    parser.add_argument("--rerank_max_tokens", type=int, default=8, help="Maximum verifier tokens per answer group")
+    parser.add_argument("--rerank_temperature", type=float, default=0.0, help="Verifier sampling temperature")
     args = parser.parse_args()
 
     evaluation = args.eval
@@ -48,14 +51,16 @@ def main():
         project="cse151b",
         group="exp-03-voting",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-01vote",
+        name="upped-parameters-reranking",
         tags=["voting", "public-data"],
         config={
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
             "dataset": DATA_PATH,
             "temperature": args.temperature,
-            "top_p": args.top_p
+            "top_p": args.top_p,
+            "rerank": args.rerank,
+            "rerank_max_tokens": args.rerank_max_tokens,
         }
     )
 
@@ -270,10 +275,7 @@ Matches option A.
         return True
 
     def get_mathematical_majority_vote(responses: list[str]) -> str:
-        """
-        Takes N model responses, groups them by multi-part mathematical equivalence, 
-        and returns the shortest winning reasoning trace.
-        """
+        """Takes N model responses and returns the shortest winning reasoning trace."""
         extracted_data = []
         
         for resp in responses:
@@ -320,19 +322,195 @@ Matches option A.
         representative_trace = min(best_group["raw_responses"], key=len)
         
         return representative_trace
+
+    def choose_traces_with_optional_rerank(items, raw_outputs):
+        """
+        Select one trace per item. By default this is normal majority voting.
+        With --rerank, group equivalent boxed answers, verify one shortest trace
+        per group, and select by:
+            2 * generation_votes
+            +3 for CORRECT, -3 for INCORRECT, -1 for UNCERTAIN.
+        """
+        verifier_system_prompt = (
+            "You are an expert mathematician verifying a candidate solution.\n"
+            "Respond with exactly one label and nothing else:\n"
+            "CORRECT\n"
+            "INCORRECT\n"
+            "UNCERTAIN"
+        )
+
+        def build_verifier_messages(item, answer, trace):
+            question = item["question"]
+            if item.get("options"):
+                labels = [chr(65 + i) for i in range(len(item["options"]))]
+                opts_text = "\n".join(
+                    f"{lbl}. {opt.strip()}" for lbl, opt in zip(labels, item["options"])
+                )
+                problem_text = f"{question}\n\nOptions:\n{opts_text}"
+            else:
+                problem_text = question
+
+            max_trace_chars = 9000
+            trace_text = trace
+            if len(trace_text) > max_trace_chars:
+                trace_text = "[...]\n" + trace_text[-max_trace_chars:]
+
+            user_prompt = (
+                f"Problem:\n{problem_text}\n\n"
+                f"Candidate final answer:\n\\boxed{{{answer}}}\n\n"
+                f"Candidate reasoning:\n{trace_text}\n\n"
+                "Is the boxed answer correct? Respond with exactly one label:\n"
+                "CORRECT\n"
+                "INCORRECT\n"
+                "UNCERTAIN"
+            )
+            return [
+                {"role": "system", "content": verifier_system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+
+        def verifier_label(text):
+            label_text = text.strip().upper()
+            if re.search(r"\bINCORRECT\b", label_text):
+                return "INCORRECT"
+            if re.search(r"\bCORRECT\b", label_text):
+                return "CORRECT"
+            if re.search(r"\bUNCERTAIN\b", label_text):
+                return "UNCERTAIN"
+            return "UNCERTAIN"
+
+        def build_answer_groups(generated_texts):
+            groups = []
+            for raw_text in generated_texts:
+                answer = judger.extract_ans(raw_text)
+                if not answer:
+                    continue
+
+                matched_group = None
+                for group in groups:
+                    if compare_predictions(answer, group["representative"]):
+                        matched_group = group
+                        break
+
+                if matched_group is None:
+                    groups.append({
+                        "representative": answer,
+                        "count": 1,
+                        "raw_responses": [raw_text],
+                    })
+                else:
+                    matched_group["count"] += 1
+                    matched_group["raw_responses"].append(raw_text)
+            return groups
+
+        selections = []
+        verifier_prompts = []
+        verifier_targets = []
+
+        for item_idx, (item, out) in enumerate(zip(items, raw_outputs)):
+            generated_texts = [comp.text.strip() for comp in out.outputs]
+            majority_trace = get_mathematical_majority_vote(generated_texts)
+            groups = build_answer_groups(generated_texts)
+
+            selection = {
+                "generated_texts": generated_texts,
+                "majority_response": majority_trace,
+                "majority_answer": judger.extract_ans(majority_trace),
+                "groups": groups,
+                "response": majority_trace,
+                "reranked_answer": None,
+                "rerank_used": False,
+            }
+            selections.append(selection)
+
+            if not args.rerank or not groups:
+                continue
+
+            for group_idx, group in enumerate(groups):
+                group["representative_trace"] = min(group["raw_responses"], key=len)
+                group["verifier_label"] = "UNCERTAIN"
+                group["verifier_output"] = ""
+                messages = build_verifier_messages(
+                    item,
+                    group["representative"],
+                    group["representative_trace"],
+                )
+                verifier_prompts.append(tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                ))
+                verifier_targets.append((item_idx, group_idx))
+
+        if args.rerank and verifier_prompts:
+            print(f"Running verifier reranker on {len(verifier_prompts)} answer groups...")
+            verifier_sampling_params = SamplingParams(
+                max_tokens=args.rerank_max_tokens,
+                temperature=args.rerank_temperature,
+                top_p=1.0,
+                top_k=20,
+                min_p=0.0,
+                n=1,
+            )
+            verifier_outputs = llm.generate(
+                verifier_prompts,
+                sampling_params=verifier_sampling_params,
+                use_tqdm=True,
+            )
+            for (item_idx, group_idx), verifier_out in zip(verifier_targets, verifier_outputs):
+                text = verifier_out.outputs[0].text.strip()
+                group = selections[item_idx]["groups"][group_idx]
+                group["verifier_output"] = text
+                group["verifier_label"] = verifier_label(text)
+
+        if args.rerank:
+            label_bonus = {"CORRECT": 3, "INCORRECT": -3, "UNCERTAIN": -1}
+            for selection in selections:
+                if not selection["groups"]:
+                    continue
+
+                for group in selection["groups"]:
+                    label = group.get("verifier_label", "UNCERTAIN")
+                    group["rerank_score"] = 2 * group["count"] + label_bonus.get(label, -1)
+                    group.setdefault("representative_trace", min(group["raw_responses"], key=len))
+
+                best_group = max(
+                    selection["groups"],
+                    key=lambda g: (
+                        g["rerank_score"],
+                        g["count"],
+                        -len(g["representative_trace"]),
+                    ),
+                )
+                selection["response"] = best_group["representative_trace"]
+                selection["reranked_answer"] = best_group["representative"]
+                selection["rerank_used"] = True
+
+        compact_meta = []
+        responses = []
+        for selection in selections:
+            responses.append(selection["response"])
+            compact_meta.append({
+                "majority_response": selection["majority_response"],
+                "majority_answer": selection["majority_answer"],
+                "reranked_answer": selection["reranked_answer"],
+                "rerank_used": selection["rerank_used"],
+                "rerank_groups": [
+                    {
+                        "answer": group["representative"],
+                        "votes": group["count"],
+                        "verifier_label": group.get("verifier_label"),
+                        "verifier_output": group.get("verifier_output"),
+                        "rerank_score": group.get("rerank_score"),
+                    }
+                    for group in selection["groups"]
+                ],
+            })
+
+        return responses, compact_meta
     
     print("Running Mathematical Majority Voting...")
-
-    responses = []
-
-    for idx, out in enumerate(outputs):
-        generated_texts = [comp.text.strip() for comp in out.outputs]
-        
-        winning_trace = get_mathematical_majority_vote(generated_texts)
-        
-        responses.append(winning_trace)
-        print(f"Processed {idx+1}/{len(outputs)} questions")
-
+    responses, selection_meta = choose_traces_with_optional_rerank(data, outputs)
     print("Voting complete!")
 
 
@@ -352,7 +530,7 @@ Matches option A.
 
     if evaluation:
         prediction_table = wandb.Table(columns=["ID", "Type", "Ground Truth", "Model Response", "Correct"])
-        for item, response in tqdm(zip(data, responses), total=len(data), desc="Scoring"):
+        for item, response, meta in tqdm(zip(data, responses, selection_meta), total=len(data), desc="Scoring"):
             is_mcq = bool(item.get("options"))
             gold   = item["answer"]
 
@@ -367,7 +545,7 @@ Matches option A.
                         options=[[]] * len(gold_list),
                     )
                 except Exception as e:
-                    print(f"JUDGER CRASHED ON: {item.get("id")} | Error: {e}")
+                    print(f"JUDGER CRASHED ON: {item.get('id')} | Error: {e}")
                     correct = False
 
             results.append({
@@ -376,6 +554,7 @@ Matches option A.
                 "gold":     gold,
                 "response": response,
                 "correct":  correct,
+                **meta,
             })
             q_type = "MCQ" if is_mcq else "Free-form"
             prediction_table.add_data(item.get("id"), q_type, str(gold), response, correct)
@@ -408,12 +587,13 @@ Matches option A.
         })
     else:
         prediction_table = wandb.Table(columns=["ID", "Type", "Model Response"])
-        for item, response in tqdm(zip(data, responses), total=len(data), desc="Recording"):
+        for item, response, meta in tqdm(zip(data, responses, selection_meta), total=len(data), desc="Recording"):
             is_mcq = bool(item.get("options"))
             results.append({
                 "id":       item.get("id"),
                 "is_mcq":   is_mcq,
                 "response": response,
+                **meta,
             })
             q_type = "MCQ" if is_mcq else "Free-form"
             prediction_table.add_data(item.get("id"), q_type, response)
@@ -430,19 +610,39 @@ Matches option A.
         for r in results:
             if evaluation:
                 record = {"id": r["id"], "is_mcq": r["is_mcq"], "gold": r["gold"],
-                        "response": r["response"], "correct": r["correct"]}
+                        "response": r["response"], "correct": r["correct"],
+                        "majority_response": r["majority_response"],
+                        "majority_answer": r["majority_answer"],
+                        "reranked_answer": r["reranked_answer"],
+                        "rerank_used": r["rerank_used"],
+                        "rerank_groups": r["rerank_groups"]}
             else:
-                record = {"id": r["id"], "is_mcq": r["is_mcq"], "response": r["response"]}
+                record = {"id": r["id"], "is_mcq": r["is_mcq"], "response": r["response"],
+                        "majority_response": r["majority_response"],
+                        "majority_answer": r["majority_answer"],
+                        "reranked_answer": r["reranked_answer"],
+                        "rerank_used": r["rerank_used"],
+                        "rerank_groups": r["rerank_groups"]}
             f.write(json.dumps(record) + "\n")
 
     print(f"Saved {len(results)} records to {out_path}")
 
     csv_path = None
+    majority_csv_path = None
     if not evaluation:
         csv_path = out_path.with_suffix('.csv')
         df = pd.DataFrame(results)[["id", "response"]]
         df.to_csv(csv_path, index=False)
         print(f"Generated submission CSV: {csv_path}")
+
+        if args.rerank:
+            majority_csv_path = out_path.with_name(f"{out_path.stem}_majority.csv")
+            majority_df = pd.DataFrame({
+                "id": [r["id"] for r in results],
+                "response": [r["majority_response"] for r in results],
+            })
+            majority_df.to_csv(majority_csv_path, index=False)
+            print(f"Generated majority-only comparison CSV: {majority_csv_path}")
 
     artifact_name = f"results-{wandb.run.id}"
     artifact_type = "evaluation_results" if evaluation else "submission"
@@ -451,6 +651,8 @@ Matches option A.
     artifact.add_file(str(out_path))
     if csv_path:
         artifact.add_file(str(csv_path))
+    if majority_csv_path:
+        artifact.add_file(str(majority_csv_path))
 
     wandb.log_artifact(artifact)
     print("Files successfully uploaded to Weights & Biases Artifacts.")
