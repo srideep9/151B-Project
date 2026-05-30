@@ -63,24 +63,24 @@ import modal
 # -----------------------------
 # USER-CONFIGURABLE CONSTANTS
 # -----------------------------
-MODEL_ID = "Qwen/Qwen2.5-Math-72B-Instruct"  # Teacher
-DATA_PATH = "data/private.jsonl"
-OUTPUT_FILE = "data/private_teacher_traces_qwen25_math72b_modal2.jsonl"
+MODEL_ID = "Qwen/QwQ-32B"  # Teacher
+DATA_PATH = "data/public.jsonl"
+OUTPUT_FILE = "data/public_teacher_traces_qwq32b_modal.jsonl"
 
 # Sampling / generation params (easily editable)
-N_GEN = 3  # generations per question
-TEMPERATURE = 0.6
+N_GEN = 3  # generations per public question for majority voting
+TEMPERATURE = 0.4
 TOP_P = 0.95
-MAX_TOKENS = 2048
-BATCH_SIZE = 24
-MAX_NUM_SEQS = 72
-MAX_MODEL_LEN = 4096
+MAX_TOKENS = 8192
+MAX_MODEL_LEN = 12288
+BATCH_SIZE = 16
+MAX_NUM_SEQS = 48
 TENSOR_PARALLEL_SIZE = 2
 STOP_STRINGS = ["<|im_end|>", "<|im_start|>", "<|endoftext|>"]
 
 # Modal settings
-MODAL_STUB_NAME = "qwen25-math72b-traces"
-# Qwen2.5-Math-72B-Instruct requires multiple large GPUs.
+MODAL_STUB_NAME = "qwq32b-public-traces"
+# QwQ-32B runs comfortably on 2 H200s with tensor parallelism and long context.
 GPU_TYPE = "H200:2"
 BASE_IMAGE = "nvidia/cuda:12.8.2-runtime-ubuntu22.04"  # valid CUDA 12.8 tag with runtime support and Python install via Modal
 VLLM_IMAGE_PACKAGES = [
@@ -412,12 +412,29 @@ def get_mathematical_majority_vote(responses: List[str]) -> Dict[str, Any]:
     return {"representative_trace": representative_trace, "status": status, "majority_answer": best_group["representative"], "group_count": best_group["count"]}
 
 
+def format_expected_answer(answer: Any) -> str:
+    if isinstance(answer, list):
+        return ", ".join(str(part) for part in answer)
+    if answer is None:
+        return ""
+    return str(answer)
+
+
+def judge_public_answer(predicted: str, expected: Any, options: Optional[list], judger_obj) -> Optional[bool]:
+    expected_text = format_expected_answer(expected)
+    if not predicted or not expected_text:
+        return None
+    if options:
+        return predicted.strip().upper() == expected_text.strip().upper()
+    return compare_predictions(predicted, expected_text, judger_obj)
+
+
 def alreadyCompletedIds(output_path: str) -> set:
     s = set()
     p = Path(output_path)
     if not p.exists():
         return s
-    valid_statuses = {"majority", "no_majority", "parse_failed", "prompt_too_long"}
+    valid_statuses = {"correct", "incorrect", "parse_failed", "prompt_too_long", "no_majority"}
     with open(p, "r") as f:
         for line in f:
             if not line.strip():
@@ -793,13 +810,13 @@ def run_local(dry_run: bool = True, resume: bool = True, max_items: Optional[int
                 to_write.append({
                     "id": uid,
                     "question": source_item.get("question"),
-                    "original_answer": source_item.get("answer"),
+                    "expected_answer": source_item.get("answer"),
+                    "predicted_answer": None,
+                    "answer_match": None,
                     "generated_traces": [],
                     "finish_reasons": r.get("finish_reasons", []),
                     "trace_parse_statuses": r.get("trace_parse_statuses", []),
                     "extracted_answers": [],
-                    "majority_answer": None,
-                    "selected_trace": None,
                     "status": "prompt_too_long",
                     "error": r.get("error"),
                     "prompt_tokens": r.get("prompt_tokens"),
@@ -816,13 +833,13 @@ def run_local(dry_run: bool = True, resume: bool = True, max_items: Optional[int
                 to_write.append({
                     "id": uid,
                     "question": source_item.get("question"),
-                    "original_answer": source_item.get("answer"),
+                    "expected_answer": source_item.get("answer"),
+                    "predicted_answer": None,
+                    "answer_match": None,
                     "generated_traces": [],
                     "finish_reasons": r.get("finish_reasons", []),
                     "trace_parse_statuses": r.get("trace_parse_statuses", []),
                     "extracted_answers": [],
-                    "majority_answer": None,
-                    "selected_trace": None,
                     "status": "error",
                     "error": r.get("error"),
                     "traceback": r.get("traceback"),
@@ -839,23 +856,42 @@ def run_local(dry_run: bool = True, resume: bool = True, max_items: Optional[int
                 "ok" if ans else "parse_failed"
                 for ans in extracted
             ]
-
             mv = get_mathematical_majority_vote(traces)
-            status = mv.get("status")
+            vote_status = mv.get("status")
             majority_answer = mv.get("majority_answer")
-            representative_trace = mv.get("representative_trace")
-            selected_trace = representative_trace if status == "majority" else None
+            selected_trace = mv.get("representative_trace") if vote_status == "majority" else None
+            predicted_answer = majority_answer if vote_status == "majority" else ""
+            answer_match = (
+                judge_public_answer(
+                    predicted_answer,
+                    source_item.get("answer"),
+                    source_item.get("options"),
+                    jud,
+                )
+                if predicted_answer
+                else None
+            )
+            if vote_status == "parse_failed":
+                status = "parse_failed"
+            elif vote_status != "majority":
+                status = "no_majority"
+            else:
+                status = "correct" if answer_match else "incorrect"
 
             to_write.append({
                 "id": uid,
                 "question": source_item.get("question"),
-                "original_answer": source_item.get("answer"),
+                "expected_answer": source_item.get("answer"),
+                "predicted_answer": predicted_answer or None,
+                "answer_match": answer_match,
                 "generated_traces": traces,
+                "selected_trace": selected_trace,
                 "finish_reasons": r.get("finish_reasons", []),
                 "trace_parse_statuses": trace_parse_statuses,
                 "extracted_answers": extracted,
                 "majority_answer": majority_answer,
-                "selected_trace": selected_trace,
+                "majority_count": mv.get("group_count"),
+                "vote_status": vote_status,
                 "status": status,
                 "model": MODEL_ID,
                 "system_prompt": SYSTEM_PROMPT_MCQ if source_item.get("options") else SYSTEM_PROMPT_MATH,
@@ -895,16 +931,17 @@ def run_local(dry_run: bool = True, resume: bool = True, max_items: Optional[int
                     print(traceback_str)
                     error_records = []
                     for item in batch:
+                        source_item = next((it for it in items if it.get("id") == item.get("id")), {})
                         error_records.append({
                             "id": item.get("id"),
                             "question": item.get("question"),
-                            "original_answer": None,
+                            "expected_answer": source_item.get("answer"),
+                            "predicted_answer": None,
+                            "answer_match": None,
                             "generated_traces": [],
                             "finish_reasons": [],
                             "trace_parse_statuses": [],
                             "extracted_answers": [],
-                            "majority_answer": None,
-                            "selected_trace": None,
                             "status": "error",
                             "error": str(e),
                             "traceback": traceback_str,
