@@ -173,7 +173,11 @@ def run_inference(
         "disable_log_stats": False,
     }
     if adapter_path:
-        llm_kwargs.update({"enable_lora": True, "max_loras": 1})
+        llm_kwargs.update({
+            "enable_lora": True,
+            "max_loras": 1,
+            "max_lora_rank": 32,
+        })
 
     llm = LLM(**llm_kwargs)
 
