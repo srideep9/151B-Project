@@ -1,9 +1,10 @@
 import torch
+import unsloth
+from unsloth import FastLanguageModel
+from unsloth.chat_templates import get_chat_template
 from datasets import load_dataset
 from trl import SFTTrainer
 from transformers import TrainingArguments
-from unsloth import FastLanguageModel
-from unsloth.chat_templates import get_chat_template
 
 MODEL_NAME = "Qwen/Qwen3-4B-Thinking-2507" 
 DATASET_FILE = "/workspace/data/sft_data1.jsonl"
@@ -20,6 +21,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length = MAX_SEQ_LENGTH,
     dtype = torch.bfloat16,
     load_in_4bit = False,
+    trust_remote_code = True
 )
 
 print("Injecting LoRA Adapters...")
@@ -32,8 +34,7 @@ model = FastLanguageModel.get_peft_model(
     lora_dropout = 0,
     bias = "none",    
     use_gradient_checkpointing = "unsloth",
-    random_state = 3407,
-    trust_remote_code = True
+    random_state = 3407
 )
 
 print("Loading and formatting dataset...")
