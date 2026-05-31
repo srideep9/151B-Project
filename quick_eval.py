@@ -17,6 +17,7 @@ from prompt_strategy import (
     classify_math_topic,
     extract_letter,
     format_answer,
+    select_curated_examples,
     select_few_shot_examples,
 )
 
@@ -207,6 +208,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--offset", type=int, default=0, help="Start index in the dataset.")
     parser.add_argument("--shots", type=int, default=0, help="Few-shot examples per problem.")
     parser.add_argument(
+        "--example-source",
+        choices=("dataset", "curated", "mixed", "none"),
+        default="curated",
+        help="Where routed few-shot examples come from.",
+    )
+    parser.add_argument(
         "--prompt-mode",
         choices=("baseline", "routed"),
         default="routed",
@@ -256,11 +263,16 @@ def main() -> None:
     prompt_records: list[dict] = []
     for item in sample:
         topic = classify_math_topic(item["question"])
-        examples = (
-            select_few_shot_examples(data, item, args.shots)
-            if args.prompt_mode == "routed"
-            else []
-        )
+        examples = []
+        if args.prompt_mode == "routed" and args.example_source != "none":
+            if args.example_source in ("curated", "mixed"):
+                examples.extend(select_curated_examples(topic.name, args.shots, bool(item.get("options"))))
+            if args.example_source == "dataset" or (
+                args.example_source == "mixed" and len(examples) < args.shots
+            ):
+                needed = args.shots - len(examples)
+                examples.extend(select_few_shot_examples(data, item, needed))
+
         system, user = build_prompt(
             item["question"],
             item.get("options"),
@@ -279,6 +291,7 @@ def main() -> None:
                 "id": item.get("id"),
                 "topic": topic.name,
                 "prompt_mode": args.prompt_mode,
+                "example_source": args.example_source,
                 "is_mcq": bool(item.get("options")),
                 "few_shot_ids": [example.get("id") for example in examples],
                 "prompt": prompt,
@@ -318,6 +331,7 @@ def main() -> None:
                 "id": item.get("id"),
                 "topic": prompt_record["topic"],
                 "prompt_mode": prompt_record["prompt_mode"],
+                "example_source": prompt_record["example_source"],
                 "is_mcq": bool(item.get("options")),
                 "gold": item.get("answer"),
                 "response": response,

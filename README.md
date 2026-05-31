@@ -39,6 +39,20 @@ Test the scoring/output plumbing instantly with the mock backend:
 python3 quick_eval.py --limit 5 --shots 2 --prompt-mode routed --backend mock
 ```
 
+Few-shot examples can come from the public dataset, curated examples, both, or
+neither:
+
+```bash
+python3 quick_eval.py --limit 3 --shots 1 --prompt-mode routed --example-source dataset --preview-only
+python3 quick_eval.py --limit 3 --shots 1 --prompt-mode routed --example-source curated --preview-only
+python3 quick_eval.py --limit 3 --shots 2 --prompt-mode routed --example-source mixed --preview-only
+```
+
+Curated example placeholders live in `CURATED_FEW_SHOT_EXAMPLES` inside
+`prompt_strategy.py`. Each topic has three described slots. Fill in `question`
+and `answer`; optionally add `options` for MCQ examples and `approach` for a
+short non-chain-of-thought solution note. Empty placeholders are skipped.
+
 Create a routing audit file for manual topic-label review:
 
 ```bash
@@ -70,7 +84,7 @@ Run both commands on the same dataset slice:
 
 ```bash
 python3 quick_eval.py --limit 25 --prompt-mode baseline --backend transformers --output results/baseline_25.jsonl
-python3 quick_eval.py --limit 25 --shots 1 --prompt-mode routed --backend transformers --quantization 4bit --output results/routed_25.jsonl
+python3 quick_eval.py --limit 25 --shots 1 --prompt-mode routed --example-source curated --backend transformers --quantization 4bit --output results/routed_25.jsonl
 ```
 
 Then compare the result files:
@@ -80,8 +94,8 @@ python3 compare_results.py --base results/baseline_25.jsonl --candidate results/
 ```
 
 `baseline` uses the starter-style prompt. `routed` adds the topic-specific
-prompt hint and same-topic few-shot examples. Increase `--limit` only after the
-small run looks healthy.
+prompt hint and few-shot examples from `--example-source`. Increase `--limit`
+only after the small run looks healthy.
 
 ## NuminaMath Teacher SFT Data
 
