@@ -6,21 +6,21 @@ from tqdm import tqdm
 
 SYSTEM_PROMPT_OPENTHOUGHTS = (
     "You are an MIT mathematician.\n"
-    "Solve the problem by thinking step-by-step inside <think> tags. "
+    "Solve the problem by thinking deeply inside <think> tags. "
     "Explore multiple paths if necessary to guarantee the correct mathematical result.\n"
     "Then output the final answer inside a single \\boxed{}."
 )
 
 SYSTEM_PROMPT_MATH = (
     "You are an MIT mathematician.\n"
-    "Solve the problem using extremely concise internal reasoning inside <think> tags. "
-    "Keep reasoning precise and computation-focused. "
-    "Avoid any conversational text, repetition, and unnecessary verification. No explanations or narrative sentences.\n"
+    "Solve the problem by thinking deeply inside <think> tags. "
+    "You must think step-by-step, write out your detailed mathematical derivations, and explain your internal logic. "
+    "Explore multiple paths, verify your work carefully, and correct yourself if you make a mistake. Take as much space as needed to guarantee the correct mathematical result.\n"
     "Then output the final answer(s) inside a single \\boxed{}.\n"
     "CRITICAL FORMATTING RULES:\n"
     "- Do not include units or labels inside \\boxed{}.\n"
     "- If the problem has multiple [ANS] blanks, output the answers in the exact order they are requested, separated by commas, inside one box. The number of comma-separated items inside your \\boxed{} MUST exactly match the number of [ANS] placeholders in the question.\n"
-    "- If there is only ONE [ANS] placeholder, but the solution has multiple values, you MUST group them inside parentheses. Correct: \\boxed{(7, -7)}.\n"
+    "- If there is only ONE [ANS] placeholder, but the solution has multiple values, you MUST group them inside parentheses seperated by commas. Example: \\boxed{(7, -7)}.\n"
     "- Always prefer exact symbolic forms for answers. Do not convert fractions to decimals. If a decimal is required, you MUST provide the answer to at least 6 decimal places. Never round or truncate intermediate values. Carry full precision through every step.\n"
     "- NEVER debate or second-guess formatting expectations inside the <think> tags. Once derived, immediately output the \\boxed{} and stop.\n"
     "- Do not output anything after the boxed answer."
@@ -28,15 +28,15 @@ SYSTEM_PROMPT_MATH = (
 
 SYSTEM_PROMPT_MCQ = (
     "You are an MIT mathematician.\n"
-    "Solve the problem using extremely concise internal reasoning inside <think> tags. "
-    "Keep reasoning precise and computation-focused. "
-    "Avoid any conversational text, repetition, and unnecessary verification. No explanations or narrative sentences.\n"
+    "Solve the problem by thinking deeply inside <think> tags. "
+    "You must think step-by-step, write out your detailed mathematical derivations, and explain your internal logic. "
+    "Explore multiple paths, verify your work carefully, and correct yourself if you make a mistake. Take as much space as needed to guarantee the correct mathematical result.\n"
     "Then output ONLY the final multiple-choice answer as a single uppercase letter inside a \\boxed{}.\n"
     "CRITICAL FORMATTING RULES:\n"
     "- Output exactly one boxed uppercase letter as your answer, e.g., \\boxed{C}\n"
     "- Do not output the answer text or numeric value.\n"
     "- Do not include punctuation inside the box.\n"
-    "- NEVER debate or second-guess formatting expectations inside the <think> tags.\n"
+    "- NEVER debate or second-guess formatting expectations inside the <think> tags. Once derived, immediately output the \\boxed{} and stop.\n"
     "- Do not output anything after the boxed answer."
 )
 
@@ -64,7 +64,7 @@ def build_dataset():
             continue
             
         token_count = row.get("generated_token_count", float('inf'))
-        if token_count >= 8000:
+        if token_count >= 8100 or token_count <= 500:
             continue
             
         question = row.get("problem", "")
