@@ -34,7 +34,7 @@ def main():
 
     evaluation = args.eval
     # ── Configuration ─────────────────────────────────────────────────────────────
-    MODEL_ID    = "Qwen/Qwen3-4B-Thinking-2507"
+    MODEL_ID    = "hzia360/qwen3-4b-sft-merged1"
     GPU_ID      = "0"
     DATA_PATH   = "data/public.jsonl" if evaluation else "data/private.jsonl"
     OUTPUT_PATH = args.output_path
@@ -46,10 +46,10 @@ def main():
     wandb.init(
         entity="dame-dolla",
         project="cse151b",
-        group="exp-03-voting",
+        group="exp-04-sft",
         job_type="evaluate" if evaluation else "inference",
-        name="eval-01vote",
-        tags=["voting", "public-data"],
+        name="eval-02sft",
+        tags=["voting", "sft", "private-data"],
         config={
             "model_id": MODEL_ID,
             "max_tokens": MAX_TOKENS,
@@ -64,26 +64,25 @@ def main():
     n_free = sum(not d.get("options")   for d in data)
     print(f"Loaded {len(data)} questions  ({n_mcq} MCQ, {n_free} free-form)")
 
-
     SYSTEM_PROMPT_MATH = (
         "You are an MIT mathematician.\n"
         "Solve the problem using extremely concise internal reasoning inside <think> tags. "
-        "Keep reasoning minimal, precise, and computation-focused. "
+        "Keep reasoning precise and computation-focused. "
         "Avoid any conversational text, repetition, and unnecessary verification. No explanations or narrative sentences.\n"
         "Then output the final answer(s) inside a single \\boxed{}.\n"
         "CRITICAL FORMATTING RULES:\n"
         "- Do not include units or labels inside \\boxed{}.\n"
-        "- If the problem has multiple sub-answers or multiple [ANS] blanks, output the answers in the exact order they are requested, separated by commas, inside one box, e.g., \\boxed{3, 7, yes}.\n"
-        "- Preserve required parentheses, brackets, and interval notation, e.g., \\boxed{(2, -2)}.\n"
-        "- Always prefer exact symbolic forms for answers, no matter the type of question being asked. If a decimal is required, you MUST provide the answer to at least 6 decimal place.\n"
-        "- NEVER debate or second-guess formatting expectations inside the <think> tags. Once you have derived the required values, immediately output the \\boxed{} and stop.\n"
+        "- If the problem has multiple [ANS] blanks, output the answers in the exact order they are requested, separated by commas, inside one box. The number of comma-separated items inside your \\boxed{} MUST exactly match the number of [ANS] placeholders in the question.\n"
+        "- If there is only ONE [ANS] placeholder, but the solution has multiple values, you MUST group them inside parentheses. Correct: \\boxed{(7, -7)}.\n"
+        "- Always prefer exact symbolic forms for answers. Do not convert fractions to decimals. If a decimal is required, you MUST provide the answer to at least 6 decimal places. Never round or truncate intermediate values. Carry full precision through every step.\n"
+        "- NEVER debate or second-guess formatting expectations inside the <think> tags. Once derived, immediately output the \\boxed{} and stop.\n"
         "- Do not output anything after the boxed answer."
     )
 
     SYSTEM_PROMPT_MCQ = (
         "You are an MIT mathematician.\n"
         "Solve the problem using extremely concise internal reasoning inside <think> tags. "
-        "Keep reasoning minimal, precise, and computation-focused. "
+        "Keep reasoning precise and computation-focused. "
         "Avoid any conversational text, repetition, and unnecessary verification. No explanations or narrative sentences.\n"
         "Then output ONLY the final multiple-choice answer as a single uppercase letter inside a \\boxed{}.\n"
         "CRITICAL FORMATTING RULES:\n"
