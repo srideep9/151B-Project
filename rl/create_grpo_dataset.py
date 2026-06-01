@@ -83,7 +83,7 @@ def build_grpo_dataset():
     
     ot_count = 0
     start_index = 30000 
-    target_count = 8000 
+    target_count = 0
     
     for i in tqdm(range(start_index, len(ot_dataset)), desc="Processing Unseen OpenThoughts"):
         row = ot_dataset[i]
@@ -137,7 +137,7 @@ def build_grpo_dataset():
             })
             
     # OVERSAMPLING: Multiply the Kaggle rows by 5 to anchor the RL algorithm
-    oversample_multiplier = 3
+    oversample_multiplier = 1
     train_set.extend(kaggle_rows * oversample_multiplier)
     
     # ==========================================

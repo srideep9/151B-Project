@@ -12,7 +12,7 @@ import modal
 # MODAL CONFIG
 # ─────────────────────────────────────────
 APP_NAME = "child-grpo-finetune"
-GPU_TYPE = "H200:2"
+GPU_TYPE = "H200"
 
 CHECKPOINT_VOL = modal.Volume.from_name("child-finetune-checkpoints", create_if_missing=True)
 CACHE_VOL      = modal.Volume.from_name("qwen-model-cache",           create_if_missing=True)
@@ -54,11 +54,11 @@ app = modal.App(APP_NAME)
 BASE_MODEL_ID    = "hzia360/qwen3-4b-sft-merged2" 
 REMOTE_OUTPUT_DIR = "/checkpoints/qwen3-4b-grpo-lora"
 
-MAX_SEQ_LENGTH          = 8192
-GRPO_MAX_NEW_TOKENS     = 4096
+MAX_SEQ_LENGTH          = 4096
+GRPO_MAX_NEW_TOKENS     = 2048
 NUM_TRAIN_EPOCHS        = 1
 LEARNING_RATE           = 5e-6
-PER_DEVICE_TRAIN_BATCH  = 8      # questions per step
+PER_DEVICE_TRAIN_BATCH  = 4      # questions per step
 GRADIENT_ACCUMULATION   = 4      # effective batch = 8
 NUM_GENERATIONS         = 4      # responses sampled per question
 LORA_R                  = 32
@@ -372,7 +372,8 @@ def train_grpo(
     print("output_dir:        ", output_dir)
     print("hf_repo_id:        ", hf_repo_id)
     print("cuda_available:    ", torch.cuda.is_available())
-    print("cuda device count:   ", torch.cuda.device_count())
+    if torch.cuda.is_available():
+        print("gpu:               ", torch.cuda.get_device_name(0))
 
     # ── Tokenizer ────────────────────────────────────────────────────────────────
     tokenizer = AutoTokenizer.from_pretrained(
@@ -384,15 +385,13 @@ def train_grpo(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-
     # ── Model (16-bit, no quantization) ──────────────────────────────────────────
     model = AutoModelForCausalLM.from_pretrained(
         base_model_id,
         trust_remote_code=True,
         cache_dir="/cache/huggingface/hub",
         torch_dtype=torch.bfloat16,
-        device_map={"": 0},
+        device_map="auto",
     )
     model.config.use_cache = False
 
@@ -441,6 +440,7 @@ def train_grpo(
         save_strategy="steps",
         save_steps=50,
         save_total_limit=2,
+        seed=SEED,
         report_to="none",
         
         # GRPO-specific
@@ -452,8 +452,7 @@ def train_grpo(
         # vLLM Integration for fast rollouts
         use_vllm=True,
         vllm_max_model_length=MAX_SEQ_LENGTH,
-        vllm_gpu_memory_utilization=0.5,
-        vllm_mode="colocate",
+        vllm_gpu_memory_utilization=0.4,
         
         # Keep memory usage reasonable
         gradient_checkpointing=True,
