@@ -435,7 +435,7 @@ def main(
     output_path: str = "",
     model_id: str = DEFAULT_MODEL_ID,
     num_samples: int = 0,
-    num_outputs: int = 1,
+    num_outputs: int = 15,
     temperature: float = 0.2,
     top_p: float = 0.95,
     max_tokens: int = 8192,
