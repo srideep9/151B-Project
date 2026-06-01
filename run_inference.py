@@ -20,20 +20,12 @@ from typing import Optional
 import modal
 
 
-DEFAULT_MODEL_ID = "hzia360/qwen3-4b-sft-merged2"
+DEFAULT_MODEL_ID = "Qwen/Qwen3-4B-Thinking-2507"
 DEFAULT_PUBLIC_DATA = "data/public.jsonl"
 DEFAULT_PRIVATE_DATA = "data/private.jsonl"
 
 app = modal.App("cse151b-routed-inference")
 vol = modal.Volume.from_name("inference-results", create_if_missing=True)
-
-
-def download_default_model() -> None:
-    """Bake the default model into the Modal image when credentials allow it."""
-
-    from huggingface_hub import snapshot_download
-
-    snapshot_download(DEFAULT_MODEL_ID)
 
 
 image = (
@@ -54,13 +46,10 @@ image = (
         "huggingface_hub",
         "hf_transfer",
     )
-    .run_function(
-        download_default_model,
-        secrets=[modal.Secret.from_name("huggingface-secret")],
-    )
     .add_local_file("utils.py", remote_path="/root/utils.py")
     .add_local_file("judger.py", remote_path="/root/judger.py")
     .add_local_file("prompt_strategy.py", remote_path="/root/prompt_strategy.py")
+    .add_local_file("rerank_strategy.py", remote_path="/root/rerank_strategy.py")
     .add_local_dir("data", remote_path="/root/data")
 )
 
@@ -239,7 +228,7 @@ def _normalize_config(config: dict) -> dict:
         )
     normalized.setdefault("model_id", DEFAULT_MODEL_ID)
     normalized.setdefault("num_samples", None)
-    normalized.setdefault("num_outputs", 1)
+    normalized.setdefault("num_outputs", 15)
     normalized.setdefault("temperature", 0.2)
     normalized.setdefault("top_p", 0.95)
     normalized.setdefault("max_tokens", 8192)
@@ -248,6 +237,9 @@ def _normalize_config(config: dict) -> dict:
     normalized.setdefault("prompt_mode", "routed")
     normalized.setdefault("example_source", "curated")
     normalized.setdefault("shots", 1)
+    normalized.setdefault("rerank", True)
+    normalized.setdefault("rerank_max_tokens", 512)
+    normalized.setdefault("rerank_max_trace_chars", 1600)
     return normalized
 
 
@@ -270,6 +262,7 @@ def run_inference(config: dict) -> dict:
         select_curated_examples,
         select_few_shot_examples,
     )
+    from rerank_strategy import build_rerank_messages, parse_rerank_choice
     from tqdm import tqdm
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
@@ -373,15 +366,73 @@ def run_inference(config: dict) -> dict:
     outputs = llm.generate(prompts, sampling_params=sampling_params, use_tqdm=True)
     all_generated_texts = [[choice.text.strip() for choice in output.outputs] for output in outputs]
 
-    if int(args["num_outputs"]) > 1:
+    num_outputs = int(args["num_outputs"])
+    if num_outputs > 1:
         print("Running parallel mathematical majority voting")
-        responses = []
+        fallback_responses = []
         with concurrent.futures.ProcessPoolExecutor() as executor:
             iterator = executor.map(majority_vote, all_generated_texts)
             for response in tqdm(iterator, total=len(all_generated_texts), desc="Voting"):
-                responses.append(response)
+                fallback_responses.append(response)
     else:
-        responses = [texts[0] if texts else "" for texts in all_generated_texts]
+        fallback_responses = [texts[0] if texts else "" for texts in all_generated_texts]
+
+    responses = list(fallback_responses)
+    selection_records = [
+        {
+            "candidate_count": len(texts),
+            "selection_method": "majority_vote" if num_outputs > 1 else "single",
+            "rerank_choice": None,
+        }
+        for texts in all_generated_texts
+    ]
+
+    if bool(args["rerank"]) and num_outputs > 1:
+        print("Running reranker verification pass")
+        rerank_messages_list = [
+            build_rerank_messages(
+                item["question"],
+                item.get("options"),
+                texts,
+                max_trace_chars=int(args["rerank_max_trace_chars"]),
+            )
+            for item, texts in zip(data, all_generated_texts)
+        ]
+        rerank_prompts = [
+            tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for messages in rerank_messages_list
+        ]
+        rerank_sampling_params = SamplingParams(
+            max_tokens=int(args["rerank_max_tokens"]),
+            temperature=0.0,
+            top_p=1.0,
+            n=1,
+            presence_penalty=0.0,
+            repetition_penalty=1.0,
+        )
+        rerank_outputs = llm.generate(
+            rerank_prompts,
+            sampling_params=rerank_sampling_params,
+            use_tqdm=True,
+        )
+        rerank_texts = [
+            output.outputs[0].text.strip() if output.outputs else ""
+            for output in rerank_outputs
+        ]
+        for idx, (texts, rerank_text) in enumerate(zip(all_generated_texts, rerank_texts)):
+            choice_idx = parse_rerank_choice(rerank_text, len(texts))
+            if choice_idx is None:
+                selection_records[idx]["selection_method"] = "majority_vote_fallback"
+                selection_records[idx]["rerank_output"] = rerank_text
+                continue
+            responses[idx] = texts[choice_idx]
+            selection_records[idx]["selection_method"] = "rerank"
+            selection_records[idx]["rerank_choice"] = choice_idx + 1
+            selection_records[idx]["rerank_output"] = rerank_text
 
     results = []
     if evaluation:
@@ -395,10 +446,16 @@ def run_inference(config: dict) -> dict:
             ):
                 scored["topic"] = prompt_record["topic"]
                 scored["few_shot_ids"] = prompt_record["few_shot_ids"]
+                scored.update(selection_records[len(results)])
                 results.append(scored)
         print(_summarize(results))
     else:
-        for item, response, prompt_record in zip(data, responses, prompt_records):
+        for item, response, prompt_record, selection_record in zip(
+            data,
+            responses,
+            prompt_records,
+            selection_records,
+        ):
             results.append(
                 {
                     "id": item.get("id"),
@@ -406,6 +463,7 @@ def run_inference(config: dict) -> dict:
                     "topic": prompt_record["topic"],
                     "few_shot_ids": prompt_record["few_shot_ids"],
                     "response": response,
+                    **selection_record,
                 }
             )
 
@@ -435,7 +493,7 @@ def main(
     output_path: str = "",
     model_id: str = DEFAULT_MODEL_ID,
     num_samples: int = 0,
-    num_outputs: int = 1,
+    num_outputs: int = 15,
     temperature: float = 0.2,
     top_p: float = 0.95,
     max_tokens: int = 8192,
@@ -444,6 +502,9 @@ def main(
     prompt_mode: str = "routed",
     example_source: str = "curated",
     shots: int = 1,
+    rerank: bool = True,
+    rerank_max_tokens: int = 512,
+    rerank_max_trace_chars: int = 1600,
     detach: bool = False,
 ) -> None:
     """Modal CLI wrapper.
@@ -473,6 +534,9 @@ def main(
         "prompt_mode": prompt_mode,
         "example_source": example_source,
         "shots": shots,
+        "rerank": rerank,
+        "rerank_max_tokens": rerank_max_tokens,
+        "rerank_max_trace_chars": rerank_max_trace_chars,
     }
 
     if detach:
