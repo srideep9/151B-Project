@@ -17,11 +17,13 @@ This pipeline was designed for a CUDA GPU environment with vLLM.
 
 - Model: `Qwen/Qwen3-4B-Thinking-2507`
 - Precision/loading: BF16, no BitsAndBytes quantization
-- Default GPU setting: one CUDA-visible GPU
-- Default max generation tokens: `8192`
-- Default max model length: `max_tokens + 4096`
-- Default max parallel sequences: `64`
+- GPU used for selected submission: `1 x NVIDIA A100-SXM4-80GB`
+- Approximate selected submission runtime: `1h 53m 1s`
+- Selected submission max generation tokens: `8192`
+- Selected submission max model length: `max_tokens + 4096`
+- Selected submission max parallel sequences: `128`
 - Selected submission majority voting: `--num-outputs 5`
+- Selected submission temperature/top-p: `0.6` / `0.95`
 
 The first run may take longer because Hugging Face/vLLM need to download and
 cache model weights.
@@ -64,8 +66,12 @@ Python API:
 from mainInference import run_inference
 
 csv_path = run_inference(
+    output_path="results/inference.jsonl",
     num_outputs=5,
     temperature=0.6,
+    top_p=0.95,
+    max_tokens=8192,
+    max_num_seqs=128,
 )
 print(csv_path)
 ```
@@ -80,7 +86,7 @@ python mainInference.py \
   --temperature 0.6 \
   --top-p 0.95 \
   --max-tokens 8192 \
-  --max-num-seqs 64
+  --max-num-seqs 128
 ```
 
 Outputs:
@@ -109,3 +115,8 @@ generates five traces for each problem at temperature `0.6`. Final answers are
 extracted with the provided `Judger`, grouped by symbolic/numeric equivalence,
 and the shortest trace from the largest equivalent answer group is selected.
 This keeps the post-processing aligned with the competition judging logic.
+
+We also tried several more complicated training and inference approaches,
+including distillation/fine-tuning-style runs and more elaborate inference
+variants. In our Kaggle submissions, this simpler BF16 baseline with 5-way
+majority voting was the best-performing selected submission.
