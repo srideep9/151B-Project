@@ -21,7 +21,7 @@ This pipeline was designed for a CUDA GPU environment with vLLM.
 - Default max generation tokens: `8192`
 - Default max model length: `max_tokens + 4096`
 - Default max parallel sequences: `64`
-- Majority voting: supported through `--num-outputs`; default is `1`
+- Selected submission majority voting: `--num-outputs 5`
 
 The first run may take longer because Hugging Face/vLLM need to download and
 cache model weights.
@@ -55,12 +55,18 @@ data/public.jsonl
 
 ## Reproduce Submission
 
+To reproduce our selected submission, run the private set with 5-way majority
+voting:
+
 Python API:
 
 ```python
 from mainInference import run_inference
 
-csv_path = run_inference()
+csv_path = run_inference(
+    num_outputs=5,
+    temperature=0.6,
+)
 print(csv_path)
 ```
 
@@ -70,8 +76,8 @@ Command line:
 python mainInference.py \
   --data-path data/private.jsonl \
   --output-path results/inference.jsonl \
-  --num-outputs 1 \
-  --temperature 0 \
+  --num-outputs 5 \
+  --temperature 0.6 \
   --top-p 0.95 \
   --max-tokens 8192 \
   --max-num-seqs 64
@@ -98,24 +104,8 @@ answer inside a single `\boxed{}` expression.
 Multiple-choice and free-response questions use separate prompt histories and
 few-shot examples.
 
-The pipeline includes mathematical majority voting. When `--num-outputs` is
-greater than 1, the model generates multiple traces for each problem. Final
-answers are extracted with the provided `Judger`, grouped by symbolic/numeric
-equivalence, and the shortest trace from the largest equivalent answer group is
-selected. This keeps the post-processing aligned with the competition judging
-logic.
-
-## Optional Majority-Vote Run
-
-To run with voting, increase `--num-outputs` and use a nonzero temperature:
-
-```bash
-python mainInference.py \
-  --data-path data/private.jsonl \
-  --output-path results/inference_vote.jsonl \
-  --num-outputs 5 \
-  --temperature 0.6 \
-  --top-p 0.95 \
-  --max-tokens 8192 \
-  --max-num-seqs 64
-```
+The selected submission uses 5-way mathematical majority voting. The model
+generates five traces for each problem at temperature `0.6`. Final answers are
+extracted with the provided `Judger`, grouped by symbolic/numeric equivalence,
+and the shortest trace from the largest equivalent answer group is selected.
+This keeps the post-processing aligned with the competition judging logic.
